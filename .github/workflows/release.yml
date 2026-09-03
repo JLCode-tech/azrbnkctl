@@ -1,0 +1,54 @@
+name: Release
+
+# Automates semantic versioning, CHANGELOG generation, and GoReleaser builds.
+# 
+# 1. On every push to main, Release Please analyzes conventional commits
+#    (feat:, fix:, chore:, etc.) and opens/updates a "Release PR".
+# 2. The PR contains the version bump and the generated CHANGELOG.
+# 3. When YOU merge that Release PR, Release Please cuts the semantic tag (vX.Y.Z).
+# 4. The goreleaser job then runs against that new tag to build and publish the
+#    binaries to the GitHub Release page.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: google-github-actions/release-please-action@v4
+        id: release
+        with:
+          release-type: go
+
+  goreleaser:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

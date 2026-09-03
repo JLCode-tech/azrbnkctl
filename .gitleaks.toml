@@ -1,0 +1,16 @@
+# gitleaks configuration for azrbnkctl.
+# CI runs gitleaks via the security-audit job in .github/workflows/ci.yml.
+# This file extends the default ruleset and allowlists known false positives.
+title = "azrbnkctl gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+internal/k8s/ manifests and template files containing public keys, placeholders, or dummy secrets for testing.
+"""
+paths = [
+  '''internal/k8s/manifests/templates/.*''',
+  '''internal/forge/mcp/.*''',
+]

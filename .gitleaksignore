@@ -1,0 +1,5 @@
+# Gitleaks ignore list for azrbnkctl
+internal/k8s/manifests/templates/02-secret.yaml.tmpl
+internal/k8s/manifests/templates/far-secret.yaml.tmpl
+examples/agentfoundry-demo/cluster.yaml
+cluster.yaml

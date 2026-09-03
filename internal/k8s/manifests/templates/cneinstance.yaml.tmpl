@@ -1,0 +1,100 @@
+apiVersion: k8s.f5.com/v1
+kind: CNEInstance
+metadata:
+  name: instance
+  namespace: f5-bnk
+spec:
+  product:
+    gatewayAPI: true
+    type: BNK
+  manifestVersion: "{{ .ManifestVersion }}"
+  wholeCluster: true
+  telemetry:
+    loggingSubsystem:
+      enabled: false
+    metricSubsystem:
+      enabled: false
+  certificate:
+    clusterIssuer: ext-ca-cluster-issuer
+  deploymentSize: "{{ .DeploymentSize }}"
+  registry:
+    uri: {{ if .ImageRegistry }}{{ .ImageRegistry }}{{ else }}repo.f5.com{{ end }}
+    imagePullSecrets:
+      - name: far-secret
+    imagePullPolicy: Always
+  networkAttachments:
+    - tmm-ext
+{{- if .IntPCI }}
+    - tmm-int
+{{- end }}
+  dynamicRouting:
+    enabled: true
+  firewallACL:
+    enabled: true
+  pseudoCNI:
+    enabled: true
+  coreCollection:
+    enabled: false
+  intelligentLB:
+    enabled: true
+  tmmReplicas: 1
+  advanced:
+    envDiscovery:
+      enabled: false
+    demoMode:
+      enabled: false
+    maintenanceMode:
+      enabled: false
+    cneController:
+      env:
+        - name: TMM_DEFAULT_MTU
+          value: "{{ .TmmMtu }}"
+    crdConversion:
+      env:
+        - name: PATH_CERTS
+          value: /tls/crdconversion/webhook/svr
+        - name: PATH_KEYS
+          value: /tls/crdconversion/webhook/svr
+        - name: SRV_CERT
+          value: tls.crt
+        - name: SRV_KEY
+          value: tls.key
+        - name: CONTAINER_IMAGE_VERSION
+          value: "v1.250.3"
+        - name: NAMESPACE
+          value: "f5-utils"
+        - name: NODE
+          value: "aks-system"
+    tmm:
+      resources:
+        limits:
+          cpu: "4"
+          memory: "12Gi"
+          hugepages-2Mi: "4Gi"
+        requests:
+          cpu: "1"
+          memory: "4Gi"
+          hugepages-2Mi: "4Gi"
+      env:
+        - name: TMM_CALICO_ROUTER
+          value: "default"
+        - name: TMM_DEFAULT_MTU
+          value: "{{ .TmmMtu }}"
+        - name: PAL_CPU_SET
+          value: "0-3"
+        - name: TMM_MAPRES_ADDL_VETHS_ON_DP
+          value: "TRUE"
+        - name: TMM_GENERIC_SOCKET_DRIVER
+          value: "true"
+        - name: ROBIN_VFIO_RESOURCE_1
+          value: "ext"
+{{- if .IntPCI }}
+        - name: ROBIN_VFIO_RESOURCE_2
+          value: "int"
+{{- end }}
+        - name: PCIDEVICE_INTEL_COM_EXT
+          value: "{{ .ExtPCI }}"
+{{- if .IntPCI }}
+        - name: PCIDEVICE_INTEL_COM_INT
+          value: "{{ .IntPCI }}"
+{{- end }}

@@ -1,0 +1,14 @@
+{
+  "name": "azrbnkctl-pack",
+  "version": "0.9.0-rc1",
+  "pack_type": "cli_runner",
+  "target_cloud": "azure",
+  "target_service": "aks",
+  "components": [
+    "cneinstance",
+    "gateway-api",
+    "vlans-routes",
+    "egress",
+    "license"
+  ]
+}

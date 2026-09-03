@@ -1,0 +1,58 @@
+apiVersion: azrbnkctl/v1
+kind: Cluster
+
+metadata:
+  name: bnk-agentfoundry-demo
+  subscriptionId: 58a60116-e64b-4746-bc4b-9d31efee5371
+  location: australiaeast
+  resourceGroup: azrbnkctl-bnk-agentfoundry-demo-rg
+
+pattern: dual-interface
+
+network:
+  vnetCidr: 10.0.0.0/16
+  subnets:
+    system: 10.0.0.0/20
+    public: 10.0.16.0/28
+    external: 10.0.17.0/24
+    internal: 10.0.18.0/24
+
+cluster:
+  kubernetesVersion: "1.34.10"
+  systemNodePool:
+    name: system
+    vmSize: Standard_D4s_v5
+    count: 2
+  tmmNodePool:
+    name: tmm
+    vmSize: Standard_D8s_v5
+    count: 1
+    acceleratedNetworking: true
+
+bnk:
+  manifestVersion: "2.3.0-3.2598.3-0.0.170"
+  deploymentSize: "Small"
+  tmmCpu: "2"
+  tmmMemory: "4Gi"
+  tmmMtu: 1500
+  farArchive: "./keys/f5-far-auth-key.tgz"
+  jwt: "./keys/license.jwt"
+
+egress:
+  enabled: true
+  namespace: "egress-demo"
+  port: 4789
+
+forge:
+  enabled: true
+  url: http://localhost:8000
+  mcpUrl: http://localhost:8081/mcp/
+  credentialTemplateId: 3
+  username: admin
+  password: admin123
+
+tags:
+  Environment: "demo"
+  Region: "australiaeast"
+  Purpose: "bnk-agentfoundry-demo"
+  ManagedBy: "azrbnkctl"
