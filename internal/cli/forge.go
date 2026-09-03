@@ -166,7 +166,7 @@ func resolveForgeParams(cl *intent.Cluster) (restURL, mcpURL string, creds forge
 		password = os.Getenv("AZRBNKCTL_FORGE_PASSWORD")
 	}
 	if password == "" {
-		password = "changeme"
+		password = forge.DefaultPassword
 	}
 
 	creds = forge.RestCreds{
