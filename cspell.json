@@ -87,6 +87,7 @@
     "goreleaser",
     "gosec",
     "govulncheck",
+    "honnef",
     "hugepages",
     "ibmcloud",
     "iperf",
