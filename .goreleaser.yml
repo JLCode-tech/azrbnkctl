@@ -1,0 +1,67 @@
+# goreleaser config for azrbnkctl.
+# Run with: goreleaser release --clean (after tagging a release)
+# Cross-compile sweep: linux/darwin/windows × amd64/arm64.
+version: 2
+
+project_name: azrbnkctl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: azrbnkctl
+    main: ./cmd/azrbnkctl
+    binary: azrbnkctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/JLCode-tech/azrbnkctl/internal/cli.Version={{.Version}}
+      - -X github.com/JLCode-tech/azrbnkctl/internal/cli.Commit={{.ShortCommit}}
+      - -X github.com/JLCode-tech/azrbnkctl/internal/cli.BuildDate={{.Date}}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  header: |
+    ## azrbnkctl {{ .Tag }}
+
+    Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on Azure AKS.
+  footer: |
+    ---
+    See [`CHANGELOG.md`](https://github.com/JLCode-tech/azrbnkctl/blob/main/CHANGELOG.md) for the full per-version change log.
+
+    Verify the downloaded archive against `checksums.txt`:
+    ```
+    sha256sum -c checksums.txt --ignore-missing
+    ```

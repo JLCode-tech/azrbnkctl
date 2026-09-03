@@ -1,0 +1,23 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# azrbnkctl workspace state & artifacts
+.azrbnkctl/
+artifacts/
+keys/
+.env
+
+# Test artifacts & coverage
+*.out
+*.test
+/tmp/
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/

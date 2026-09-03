@@ -1,0 +1,15 @@
+{
+  "name": "azrbnkctl",
+  "version": "0.9.0-rc1",
+  "description": "F5 BIG-IP Next for Kubernetes (BNK) provisioner and operator for Azure AKS",
+  "author": "JLCode-tech",
+  "license": "MIT",
+  "repository": "https://github.com/JLCode-tech/azrbnkctl",
+  "binary": "azrbnkctl",
+  "capabilities": [
+    "provisioning",
+    "day2-operations",
+    "forge-registration",
+    "diagnostics"
+  ]
+}

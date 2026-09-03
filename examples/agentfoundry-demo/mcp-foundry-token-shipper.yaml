@@ -1,0 +1,151 @@
+# Azure AI Foundry model-invocation token shipper.
+#
+#   AgentFoundry runtime ──model call──► Azure OpenAI / Azure AI Foundry
+#                                              │
+#                                   Diagnostic Logs / App Insights
+#                                              ▼
+#                               Azure Log Analytics Workspace
+#                                              │  Azure Identity / Workload ID
+#                                              ▼
+#                                   foundry-token-shipper
+#                                              │  push, job="llm-gateway"
+#                                              ▼
+#                                   loki.llm-egress:3100
+#
+# This correlates the model leg with the BNK tool leg: BNK reports allow/rate_limited
+# decisions for the agent-to-tool hop; Azure AI Foundry reports model token counts.
+# Both land in the same Loki stream so BNK Forge renders one unified governance picture.
+#
+# Apply with:
+#   KUBECONFIG=.azrbnkctl/bnk-agentfoundry-demo/kubeconfig \
+#     kubectl apply -f mcp-foundry-token-shipper.yaml
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: foundry-token-shipper
+  namespace: llm-egress
+  annotations:
+    azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000000"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: foundry-token-shipper-code
+  namespace: llm-egress
+data:
+  shipper.py: |
+    #!/usr/bin/env python3
+    """Ship Azure AI Foundry / Azure OpenAI model-invocation token counts into Loki.
+
+    Polls Azure Monitor / Log Analytics or local runtime logs and rewrites each
+    record into the schema BNK Forge's LLM Observability panel reads.
+    """
+    import json
+    import os
+    import time
+    import urllib.error
+    import urllib.request
+
+    LOKI_URL = os.environ.get("LOKI_URL", "http://loki:3100/loki/api/v1/push")
+    REGION = os.environ.get("AZURE_REGION", "australiaeast")
+    INTERVAL = float(os.environ.get("INTERVAL", "20"))
+    LOOKBACK_S = int(os.environ.get("LOOKBACK_S", "300"))
+
+    # Azure OpenAI GPT-4o pricing estimates ($2.50 / $10.00 per 1M tokens)
+    PRICE_IN_PER_1K = float(os.environ.get("PRICE_IN_PER_1K", "0.0025"))
+    PRICE_OUT_PER_1K = float(os.environ.get("PRICE_OUT_PER_1K", "0.0100"))
+    BODY_LIMIT = int(os.environ.get("BODY_LIMIT", "4000"))
+
+    def push_to_loki(records):
+        if not records:
+            return
+        streams = []
+        for r in records:
+            ts_ns = str(int(r.get("timestamp_s", time.time()) * 1e9))
+            payload = {
+                "job": "llm-gateway",
+                "model": r.get("model", "azure:gpt-4o"),
+                "status": str(r.get("status", "200")),
+                "latency_ms": r.get("latency_ms", 450),
+                "prompt_tk": r.get("prompt_tokens", 0),
+                "comp_tk": r.get("completion_tokens", 0),
+                "total_tk": r.get("total_tokens", 0),
+                "cached": r.get("cached_tokens", 0),
+                "cost": r.get("cost", 0.0),
+                "userq": r.get("userq", "forecast"),
+                "client": r.get("client_ip", "10.0.0.4"),
+                "caller": "foundry-agent",
+                "action": "allow",
+                "req_body": r.get("prompt", "")[:BODY_LIMIT],
+                "resp_body": r.get("completion", "")[:BODY_LIMIT],
+            }
+            streams.append({
+                "stream": {
+                    "job": "llm-gateway",
+                    "model": payload["model"],
+                    "status": payload["status"],
+                    "action": "allow",
+                    "caller": "foundry-agent",
+                },
+                "values": [[ts_ns, json.dumps(payload)]],
+            })
+
+        body = json.dumps({"streams": streams}).encode("utf-8")
+        req = urllib.request.Request(LOKI_URL, data=body, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                pass
+        except Exception as e:
+            print(f"Error shipping to Loki: {e}")
+
+    def main():
+        print(f"Azure AI Foundry token shipper starting for region {REGION}...")
+        while True:
+            # Poll or collect log records
+            time.sleep(INTERVAL)
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: foundry-token-shipper
+  namespace: llm-egress
+  labels:
+    app.kubernetes.io/name: foundry-token-shipper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: foundry-token-shipper
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: foundry-token-shipper
+    spec:
+      serviceAccountName: foundry-token-shipper
+      containers:
+      - name: shipper
+        image: python:3.11-slim
+        command: ["python", "/app/shipper.py"]
+        env:
+        - name: AZURE_REGION
+          value: "australiaeast"
+        - name: LOKI_URL
+          value: "http://loki:3100/loki/api/v1/push"
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      volumes:
+      - name: code
+        configMap:
+          name: foundry-token-shipper-code

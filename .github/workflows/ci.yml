@@ -1,0 +1,250 @@
+name: CI
+
+# Runs on every PR and on push to main/staging. staging is the always-on
+# integration/build branch (PRs target staging; staging promotes to main).
+
+on:
+  pull_request:
+  push:
+    branches: [main, staging]
+
+permissions:
+  contents: read
+
+# Cancel superseded runs: a new push to the same ref aborts the in-flight
+# run instead of leaving overlapping full matrices churning.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: vet + fmt + staticcheck + test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve modules
+        run: |
+          go mod download
+          go mod verify
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt
+        # Fail if any file is not gofmt-clean.
+        run: gofmt -d -l . | tee /tmp/gofmt.diff && test ! -s /tmp/gofmt.diff
+
+      - name: staticcheck
+        # Pinned via the go.mod tool directive (matches awsbnkctl)
+        run: go tool staticcheck ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: go build
+        run: go build ./...
+
+  test-dryrun:
+    name: test-dryrun (azrbnkctl test {connectivity,dns,egress} --dry-run)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build azrbnkctl
+        run: |
+          mkdir -p bin
+          go build -o bin/azrbnkctl ./cmd/azrbnkctl
+
+      - name: azrbnkctl test connectivity --dry-run
+        run: |
+          set -eo pipefail
+          mkdir -p artifacts
+          ./bin/azrbnkctl test connectivity --target 10.0.17.10:443 --dry-run \
+            2>&1 | tee artifacts/test-connectivity-dryrun.log
+          grep -qiE 'would probe|dry[- ]run|plan' artifacts/test-connectivity-dryrun.log
+
+      - name: azrbnkctl test dns --dry-run
+        run: |
+          set -eo pipefail
+          ./bin/azrbnkctl test dns --target f5.com --dry-run \
+            2>&1 | tee artifacts/test-dns-dryrun.log
+          grep -qiE 'would query|dry[- ]run|plan' artifacts/test-dns-dryrun.log
+
+      - name: azrbnkctl test egress --dry-run
+        run: |
+          set -eo pipefail
+          ./bin/azrbnkctl test egress -f examples/dual-interface/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/test-egress-dryrun.log
+          grep -qiE 'egress|dry[- ]run|plan' artifacts/test-egress-dryrun.log
+
+      - name: Upload dry-run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-dryrun-logs
+          path: artifacts/
+          if-no-files-found: warn
+
+  up-dryrun:
+    name: up-dryrun (azrbnkctl validate + up/down --dry-run)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build azrbnkctl
+        run: |
+          mkdir -p bin
+          go build -o bin/azrbnkctl ./cmd/azrbnkctl
+
+      - name: Validate example configs
+        run: |
+          set -eo pipefail
+          ./bin/azrbnkctl validate examples/dual-interface/cluster.yaml
+          ./bin/azrbnkctl validate examples/external-only/cluster.yaml
+          ./bin/azrbnkctl validate examples/agentfoundry-demo/cluster.yaml
+
+      - name: azrbnkctl up --dry-run (dual-interface)
+        env:
+          AZRBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          mkdir -p artifacts
+          ./bin/azrbnkctl up -f examples/dual-interface/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/up-dryrun-dual-interface.log
+          grep -q 'dry-run complete' artifacts/up-dryrun-dual-interface.log
+
+      - name: azrbnkctl down --dry-run (dual-interface)
+        env:
+          AZRBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/azrbnkctl down -f examples/dual-interface/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/down-dryrun-dual-interface.log
+          grep -q 'dry-run complete' artifacts/down-dryrun-dual-interface.log
+
+      - name: azrbnkctl up --dry-run (external-only)
+        env:
+          AZRBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/azrbnkctl up -f examples/external-only/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/up-dryrun-external-only.log
+          grep -q 'dry-run complete' artifacts/up-dryrun-external-only.log
+
+      - name: azrbnkctl down --dry-run (external-only)
+        env:
+          AZRBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/azrbnkctl down -f examples/external-only/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/down-dryrun-external-only.log
+          grep -q 'dry-run complete' artifacts/down-dryrun-external-only.log
+
+      - name: Upload up/down dry-run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: up-dryrun-logs
+          path: artifacts/
+          if-no-files-found: warn
+
+  windows-build:
+    name: windows build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go build ./...
+
+  goreleaser-check:
+    name: goreleaser config sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
+  docs-spellcheck:
+    name: docs cspell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cspell (docs/**/*.md + README + CONTRIBUTING)
+        uses: streetsidesoftware/cspell-action@v6
+        with:
+          config: cspell.json
+          files: |
+            docs/**/*.md
+            README.md
+            CONTRIBUTING.md
+
+  security-audit:
+    name: security audit (gosec + govulncheck + gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gosec (Go static security analyzer)
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.22.1
+          gosec ./...
+
+      - name: govulncheck (Go vulnerability scanner)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go version
+          scripts/govulncheck-gate.sh
+
+      - name: gitleaks (secret scan — full history)
+        run: |
+          wget -q -O /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+          echo "6298c9235dfc9278c14b28afd9b7fa4e6f4a289cb1974bd27949fc1e9122bdee  /tmp/gitleaks.tar.gz" \
+            | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact -v
