@@ -8,9 +8,11 @@ useDefault = true
 
 [[allowlists]]
 description = """
-internal/k8s/ manifests and template files containing public keys, placeholders, or dummy secrets for testing.
+internal manifests, test templates, and example configs containing public keys, placeholders, or dummy secrets.
 """
 paths = [
   '''internal/k8s/manifests/templates/.*''',
   '''internal/forge/mcp/.*''',
+  '''examples/.*''',
+  '''cluster\.yaml''',
 ]

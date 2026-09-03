@@ -1,5 +1,2 @@
-# Gitleaks ignore list for azrbnkctl
-internal/k8s/manifests/templates/02-secret.yaml.tmpl
-internal/k8s/manifests/templates/far-secret.yaml.tmpl
-examples/agentfoundry-demo/cluster.yaml
-cluster.yaml
+# gitleaks ignore list — reviewed false positives (fingerprint = commit:file:rule:line).
+
