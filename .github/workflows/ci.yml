@@ -230,9 +230,9 @@ jobs:
           cache: true
 
       - name: gosec (Go static security analyzer)
-        uses: securego/gosec@v2.27.1
-        with:
-          args: ./...
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.22.1
+          gosec ./...
 
       - name: govulncheck (Go vulnerability scanner)
         run: |
