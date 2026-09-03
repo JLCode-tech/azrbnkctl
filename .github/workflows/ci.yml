@@ -46,10 +46,8 @@ jobs:
         run: gofmt -d -l . | tee /tmp/gofmt.diff && test ! -s /tmp/gofmt.diff
 
       - name: staticcheck
-        # Pinned staticcheck runner
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@2024.1.1
-          staticcheck ./...
+        # Pinned via the go.mod tool directive (matches awsbnkctl)
+        run: go tool staticcheck ./...
 
       - name: go test
         run: go test -race ./...

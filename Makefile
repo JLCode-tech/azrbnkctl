@@ -52,11 +52,7 @@ goreleaser-snapshot:
 	    $(GORELEASER_IMAGE) release --snapshot --clean
 
 staticcheck:
-	@if command -v staticcheck >/dev/null 2>&1; then \
-	    staticcheck ./...; \
-	else \
-	    echo "staticcheck not installed, skipping (run 'go install honnef.co/go/tools/cmd/staticcheck@latest')"; \
-	fi
+	go tool staticcheck ./...
 
 lint:
 	@out=$$(gofmt -d -l .); if [ -n "$$out" ]; then echo "$$out"; echo "gofmt: files need formatting (run 'gofmt -w .')"; exit 1; fi
