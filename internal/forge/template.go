@@ -15,9 +15,9 @@ const CredentialTemplateEndpoint = "/api/credential-templates"
 // DefaultUsername is the default username for local forge development.
 const DefaultUsername = "admin"
 
-// DefaultPassword is the default password for local forge development.
+// DefaultDevForgeSecret is the fallback dev secret for local forge mock server.
 // #nosec G101 -- default dev fallback, not production secret
-const DefaultPassword = "changeme"
+const DefaultDevForgeSecret = "changeme"
 
 // AzureCredentialTemplateOptions carries options for creating or updating an Azure credential template.
 type AzureCredentialTemplateOptions struct {
