@@ -230,7 +230,7 @@ jobs:
           cache: true
 
       - name: gosec (Go static security analyzer)
-        uses: securego/gosec@v2.22.1
+        uses: securego/gosec@v2.27.1
         with:
           args: ./...
 
