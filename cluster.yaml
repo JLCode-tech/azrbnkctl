@@ -3,7 +3,7 @@ kind: Cluster
 
 metadata:
   name: bnk-agentfoundry-demo
-  subscriptionId: 58a60116-e64b-4746-bc4b-9d31efee5371
+  subscriptionId: 00000000-0000-0000-0000-000000000000
   location: australiaeast
   resourceGroup: azrbnkctl-bnk-agentfoundry-demo-rg
 
