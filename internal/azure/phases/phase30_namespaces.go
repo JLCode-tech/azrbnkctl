@@ -92,6 +92,7 @@ func Phase30Namespaces(ctx context.Context, cl *intent.Cluster, st *state.State,
 }
 
 func extractAndBuildDockerConfig(farPath string) ([]byte, error) {
+	// #nosec G304 -- operator-supplied path to FAR credentials file
 	data, err := os.ReadFile(farPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading FAR file %s: %w", farPath, err)

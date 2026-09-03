@@ -18,6 +18,7 @@ import (
 func DefaultKubeconfigPath() string {
 	if v := os.Getenv("KUBECONFIG"); v != "" {
 		for _, p := range filepath.SplitList(v) {
+			// #nosec G304 G703 -- reading standard kubeconfig paths
 			if _, err := os.Stat(p); err == nil {
 				return p
 			}

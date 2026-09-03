@@ -32,6 +32,7 @@ func Phase21AKSCluster(ctx context.Context, cl *intent.Cluster, st *state.State,
 	dnsPrefix := cl.Metadata.Name
 
 	systemPoolName := cl.ClusterSpec.SystemNodePool.Name
+	// #nosec G115 -- node count bounded by cluster schema
 	systemCount := int32(cl.ClusterSpec.SystemNodePool.Count)
 	systemVMSize := cl.ClusterSpec.SystemNodePool.VMSize
 	systemMode := armcontainerservice.AgentPoolModeSystem

@@ -9,6 +9,7 @@ import (
 )
 
 // CredentialTemplateEndpoint is the forge REST path for credential templates.
+// #nosec G101 -- REST endpoint URL path, not credentials
 const CredentialTemplateEndpoint = "/api/credential-templates"
 
 // AzureCredentialTemplateOptions carries options for creating or updating an Azure credential template.

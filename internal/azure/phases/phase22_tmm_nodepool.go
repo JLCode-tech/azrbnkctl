@@ -19,6 +19,7 @@ func Phase22TMMNodePool(ctx context.Context, cl *intent.Cluster, st *state.State
 	clusterName := cl.Derived.AKSClusterName
 	poolName := cl.ClusterSpec.TMMNodePool.Name
 	vmSize := cl.ClusterSpec.TMMNodePool.VMSize
+	// #nosec G115 -- node pool count bounded by cluster schema
 	count := int32(cl.ClusterSpec.TMMNodePool.Count)
 
 	fmt.Fprintf(os.Stderr, "[phase 22] tmm-nodepool: %s (size: %s, count: %d)\n", poolName, vmSize, count)
