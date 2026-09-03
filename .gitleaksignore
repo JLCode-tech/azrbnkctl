@@ -1,0 +1,4 @@
+# gitleaks ignore list — reviewed false positives (fingerprint = commit:file:rule:line).
+# CI security-audit scans full history; ignore false-positive placeholder password in initial commit.
+5a14d38f36011674fd25628b1f8ca0b55cc85c87:internal/cli/forge.go:hashicorp-tf-password:169
+2af4b06cea49c1f20c521422440a82c5687df9c6:internal/forge/template.go:hashicorp-tf-password:20

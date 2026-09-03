@@ -1,0 +1,75 @@
+# --- Build & binary artifacts ---
+/bin/
+/azrbnkctl
+*.test
+*.out
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dist/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# --- Language toolchain caches ---
+node_modules/
+package-lock.json
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- azrbnkctl-managed cluster state (never commit) ---
+# Per-cluster kubeconfig, IDs cache, state files, ephemeral keys.
+.azrbnkctl/
+artifacts/
+clusters/
+
+# --- BNK supply-chain & cloud credentials (never commit) ---
+# Operator-supplied per cluster.yaml; grant FAR pull + license rights.
+keys/
+*.jwt
+*.token
+*.far
+*.tgz
+*.tar.gz
+cne_pull_64.json
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.kubeconfig
+kubeconfig*
+
+# --- Local environment overrides ---
+.env
+.env.*
+*.env
+*.env.local
+
+# --- Internal dev tooling & AI assistant state (not for public repo) ---
+.agent/
+.claude/
+CLAUDE.local.md
+*.maf.new
+
+# --- Internal debugging, spikes & audit notes ---
+docs/audits/
+docs/design/
+docs/spikes/
+docs/demo/
+docs/adr/
+docs/REMEDIATION.md
+
+# --- Temporary & diff files ---
+/tmp/
+*.orig
+patch.diff
