@@ -23,11 +23,11 @@ func TestRenderCNEInstance(t *testing.T) {
 	}
 
 	str := string(out)
-	if !strings.Contains(str, "PCIDEVICE_INTEL_COM_EXT") || !strings.Contains(str, "0001:00:01.0") {
-		t.Errorf("expected ExtPCI in output, got:\n%s", str)
+	if !strings.Contains(str, "TMM_GENERIC_SOCKET_DRIVER") || !strings.Contains(str, "true") {
+		t.Errorf("expected TMM_GENERIC_SOCKET_DRIVER in output, got:\n%s", str)
 	}
-	if !strings.Contains(str, "PCIDEVICE_INTEL_COM_INT") || !strings.Contains(str, "0001:00:02.0") {
-		t.Errorf("expected IntPCI in output, got:\n%s", str)
+	if !strings.Contains(str, "TMM_MAPRES_IFC_CLAIM_LIST") || !strings.Contains(str, "net1") {
+		t.Errorf("expected TMM_MAPRES_IFC_CLAIM_LIST in output, got:\n%s", str)
 	}
 }
 
