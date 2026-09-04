@@ -7,7 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 1.0.0 (2026-09-03)
 
-
 ### Features
 
 * initial azrbnkctl release and core lifecycle engine ([#2](https://github.com/JLCode-tech/azrbnkctl/issues/2)) ([7d2421f](https://github.com/JLCode-tech/azrbnkctl/commit/7d2421f62c8ba433cb8019fdc34171350204fa9b))

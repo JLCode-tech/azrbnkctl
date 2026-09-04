@@ -28,9 +28,9 @@ spec:
     - tmm-int
 {{- end }}
   dynamicRouting:
-    enabled: true
+    enabled: false
   firewallACL:
-    enabled: true
+    enabled: false
   pseudoCNI:
     enabled: true
   coreCollection:
@@ -40,9 +40,10 @@ spec:
   tmmReplicas: 1
   advanced:
     envDiscovery:
-      enabled: false
+      runAfterSuccess: true
+      stopOnFail: true
     demoMode:
-      enabled: false
+      enabled: true
     maintenanceMode:
       enabled: false
     cneController:
@@ -82,19 +83,11 @@ spec:
           value: "{{ .TmmMtu }}"
         - name: PAL_CPU_SET
           value: "0-3"
-        - name: TMM_MAPRES_ADDL_VETHS_ON_DP
-          value: "TRUE"
+        - name: ZEBOS_STATE
+          value: legacy
         - name: TMM_GENERIC_SOCKET_DRIVER
           value: "true"
-        - name: ROBIN_VFIO_RESOURCE_1
-          value: "ext"
-{{- if .IntPCI }}
-        - name: ROBIN_VFIO_RESOURCE_2
-          value: "int"
-{{- end }}
-        - name: PCIDEVICE_INTEL_COM_EXT
-          value: "{{ .ExtPCI }}"
-{{- if .IntPCI }}
-        - name: PCIDEVICE_INTEL_COM_INT
-          value: "{{ .IntPCI }}"
-{{- end }}
+        - name: TMM_MAPRES_ADDL_VETHS_ON_DP
+          value: "TRUE"
+        - name: TMM_MAPRES_IFC_CLAIM_LIST
+          value: net1
