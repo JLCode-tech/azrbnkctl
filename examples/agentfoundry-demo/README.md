@@ -94,6 +94,9 @@ KUBECONFIG=.azrbnkctl/bnk-agentfoundry-demo/kubeconfig \
 
 KUBECONFIG=.azrbnkctl/bnk-agentfoundry-demo/kubeconfig \
   kubectl apply -f examples/agentfoundry-demo/mcp-foundry-token-shipper.yaml
+
+KUBECONFIG=.azrbnkctl/bnk-agentfoundry-demo/kubeconfig \
+  kubectl apply -f examples/agentfoundry-demo/traffic-generator-deployment.yaml
 ```
 
 ### Step 5: Execute Governed Invocations
@@ -104,7 +107,7 @@ python3 examples/agentfoundry-demo/foundry-agent.py --prompt "Forecast MSFT for 
 # 2. Run stranger agent attempting to access privileged tool
 python3 examples/agentfoundry-demo/external-agent.py --tool get_account_balance --account ACC-1001
 
-# 3. Run automated traffic generator
+# 3. Run continuous in-cluster background generator (already deployed in Step 4) or local runner:
 ./examples/agentfoundry-demo/traffic-gen.sh
 
 # 4. Or execute the full 7-act guided walkthrough

@@ -25,13 +25,17 @@ type CNEInstanceData struct {
 
 // VlansRoutesData holds parameters for rendering vlans-routes.yaml.tmpl.
 type VlansRoutesData struct {
-	TmmMtu       int
-	ExtPrefixLen int
-	ExtSelfIP    string
-	ExtGwIP      string
-	IntPrefixLen int
-	IntSelfIP    string
-	IntGwIP      string
+	TmmMtu            int
+	ExtPrefixLen      int
+	ExtSelfIP         string
+	ExtGwIP           string
+	IntPrefixLen      int
+	IntSelfIP         string
+	IntGwIP           string
+	ServiceCidrDest   string
+	ServiceCidrPrefix int
+	PodCidrDest       string
+	PodCidrPrefix     int
 }
 
 // EgressData holds parameters for rendering egress.yaml.tmpl.
@@ -101,6 +105,18 @@ func RenderLicenseCR(jwt string) ([]byte, error) {
 
 // RenderVlansRoutes renders the F5SPKVlan and F5SPKStaticRoute custom resources.
 func RenderVlansRoutes(data VlansRoutesData) ([]byte, error) {
+	if data.ServiceCidrDest == "" {
+		data.ServiceCidrDest = "10.240.0.0"
+	}
+	if data.ServiceCidrPrefix == 0 {
+		data.ServiceCidrPrefix = 16
+	}
+	if data.PodCidrDest == "" {
+		data.PodCidrDest = "10.244.0.0"
+	}
+	if data.PodCidrPrefix == 0 {
+		data.PodCidrPrefix = 16
+	}
 	return renderTemplate("templates/vlans-routes.yaml.tmpl", data)
 }
 

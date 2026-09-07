@@ -26,6 +26,7 @@ var (
 	flagVerbose bool
 	flagQuiet   bool
 	flagNoColor bool
+	flagOutput  string
 )
 
 var rootCmd = &cobra.Command{
@@ -74,6 +75,7 @@ func init() {
 	pf.BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	pf.BoolVarP(&flagQuiet, "quiet", "q", false, "suppress all but errors")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable colored output")
+	pf.StringVarP(&flagOutput, "output", "o", "", "output format (e.g. json)")
 }
 
 // RootCommand returns the wired-up root cobra command for tooling that needs

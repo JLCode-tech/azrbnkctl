@@ -66,4 +66,10 @@ func TestRenderVlansRoutes(t *testing.T) {
 	if !strings.Contains(str, "destination: 10.0.17.1") {
 		t.Errorf("expected route-ext-gw, got:\n%s", str)
 	}
+	if !strings.Contains(str, "name: route-cluster-svcs") || !strings.Contains(str, "destination: 10.240.0.0") {
+		t.Errorf("expected route-cluster-svcs in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "name: route-cluster-pods") || !strings.Contains(str, "destination: 10.244.0.0") {
+		t.Errorf("expected route-cluster-pods in output, got:\n%s", str)
+	}
 }

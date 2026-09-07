@@ -40,7 +40,7 @@ func Phase36GatewayAPI(ctx context.Context, cl *intent.Cluster, st *state.State,
 				"name": "f5-cne-gateway-class",
 			},
 			"spec": map[string]interface{}{
-				"controllerName": "f5.com/cne-gateway-controller",
+				"controllerName": "f5.com/f5-bnk-f5-cne-controller",
 			},
 		},
 	}

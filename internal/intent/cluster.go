@@ -444,6 +444,21 @@ func (c *Cluster) StateDir() string {
 	return filepath.Join(".azrbnkctl", c.Metadata.Name)
 }
 
+// DefaultVIP returns the default Gateway VIP for this cluster.
+// Convention: <subnets.external network>.100 — e.g. 10.0.17.0/24 -> 10.0.17.100.
+// Returns an error when network.subnets.external is not set.
+func (c *Cluster) DefaultVIP() (string, error) {
+	if c.Network.Subnets.External == "" {
+		return "", errors.New("network.subnets.external not set; pass --vip explicitly")
+	}
+	return netcalc.Nth(c.Network.Subnets.External, 100)
+}
+
+// SyntheticAIEnabled reports whether synthetic/simulated AI inference is configured.
+func (c *Cluster) SyntheticAIEnabled() bool {
+	return false
+}
+
 func (c *Cluster) derive(baseDir string) error {
 	c.Derived.ResourceGroupName = c.Metadata.ResourceGroup
 	c.Derived.VNetName = fmt.Sprintf("vnet-%s", c.Metadata.Name)
