@@ -4,7 +4,7 @@ package cli
 // expand_scenario engine (WS-C1 of ADR-0001).
 //
 // The public API mirrors the Python module:
-//   - forgeScenarioRegistry — keyed map of all 8 synthetic presets
+//   - forgeScenarioRegistry — keyed map of all 11 synthetic presets
 //   - expandForgeScenario(key, base)  — expands a key into ordered child configs
 //
 // Values (concurrency sweeps, request-count formulas, seq-dist strings, prefix
@@ -21,6 +21,8 @@ package cli
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/jumphost"
 )
@@ -348,6 +350,80 @@ func mooncakeVariants() []forgeScenarioChild {
 // Registry
 // ---------------------------------------------------------------------------
 
+// Open-loop Poisson request-rate sweeps — the gateway-comparison standard
+// (MLPerf Server, GAIE / llm-d QPS sweeps). Requests arrive on a schedule no
+// matter how fast the proxy answers, so a slower proxy shows up as queueing
+// (higher TTFT) instead of hiding behind fewer requests as in a closed loop.
+// Mirror of benchmark_scenarios.py POISSON_RATES / POISSON_PREFIX_RATES.
+var (
+	poissonRates        = []float64{2, 4, 8, 16, 32}
+	poissonPrefixRates  = []float64{1, 2, 4, 8, 16}
+	poissonAgenticRates = []float64{8, 16, 24, 32}
+)
+
+const (
+	// poissonGoodput: MLPerf Server-style per-request targets (Llama-2-70B: TTFT 2 s, TPOT 200 ms).
+	poissonGoodput = "time_to_first_token:2000 inter_token_latency:200"
+	// Every step warms up, then measures for at least stepDurationFloorS, and
+	// long enough to collect stepMinRequests so p99 rests on a few hundred samples.
+	stepWarmupS        = 30
+	stepDurationFloorS = 120
+	stepMinRequests    = 300
+)
+
+// stepDurationS is the measured seconds for one rate step: the floor, longer at low rates.
+func stepDurationS(rate float64) float64 {
+	return math.Max(stepDurationFloorS, math.Ceil(stepMinRequests/rate))
+}
+
+// poissonVariants builds one open-loop step per rate on top of workload (ISL/OSL/prefix).
+func poissonVariants(rates []float64, workload func(*jumphost.AiperfConfig)) []forgeScenarioChild {
+	out := make([]forgeScenarioChild, len(rates))
+	for i, rate := range rates {
+		cfg := syntheticBase("")
+		cfg.RequestRate = rate
+		cfg.ArrivalPattern = "poisson"
+		cfg.WarmupDuration = stepWarmupS
+		cfg.BenchmarkDuration = stepDurationS(rate)
+		cfg.Goodput = poissonGoodput
+		// Same prompts for every proxy, so sweeps compare like for like; a new seed per
+		// step so each step brings new sessions instead of replaying the last step's.
+		cfg.RandomSeed = 42 + i
+		workload(&cfg)
+		out[i] = forgeScenarioChild{
+			VariantLabel: strconv.FormatFloat(rate, 'g', -1, 64) + "rps",
+			Config:       cfg,
+		}
+	}
+	return out
+}
+
+// poissonRateVariants: chat 1k in / 128 out (ISL random ±10%), one step per request rate.
+func poissonRateVariants() []forgeScenarioChild {
+	return poissonVariants(poissonRates, func(c *jumphost.AiperfConfig) {
+		c.ISL, c.ISLStddev, c.OSL = 1000, 100, 128
+	})
+}
+
+// poissonPrefixVariants: KV-aware routing workload, 5k prompts with an 80% shared prefix over 20 groups.
+func poissonPrefixVariants() []forgeScenarioChild {
+	return poissonVariants(poissonPrefixRates, func(c *jumphost.AiperfConfig) {
+		c.ISL, c.ISLStddev, c.OSL = 1000, 100, 128
+		c.PrefixPromptLength, c.NumPrefixPrompts = 4000, 20
+	})
+}
+
+// poissonAgenticVariants: agentic long context, 300 sessions sharing a 16k-token
+// context, 1k new tokens / 64 out. The shared contexts (~4.8M tokens) exceed the KV
+// cache of four 70B replicas, so replicas evict: only cache-aware routing keeps a
+// session on one replica; round robin re-prefills it everywhere.
+func poissonAgenticVariants() []forgeScenarioChild {
+	return poissonVariants(poissonAgenticRates, func(c *jumphost.AiperfConfig) {
+		c.ISL, c.ISLStddev, c.OSL = 1000, 100, 64
+		c.PrefixPromptLength, c.NumPrefixPrompts = 16000, 300
+	})
+}
+
 // forgeScenarioRegistry is the ordered list of all scenario definitions.
 // Mirror of benchmark_scenarios.py SCENARIO_PRESETS.
 //
@@ -414,6 +490,27 @@ var forgeScenarioRegistry = []forgeScenario{
 		Description:   "5 rounds of burst (c=200) + probe (c=25) phases.",
 		Tags:          []string{"synthetic", "multi-phase"},
 		buildVariants: burstRecoveryVariants,
+	},
+	{
+		Key:           "poisson-rate",
+		Name:          "Poisson Rate Sweep (chat)",
+		Description:   "Open-loop Poisson arrivals, one step per request rate {2,4,8,16,32}. ISL 1000±100 / OSL 128. Each step: 30 s warmup, then at least 120 s and 300 requests measured. Goodput targets TTFT 2000 ms, ITL 200 ms.",
+		Tags:          []string{"synthetic", "open-loop"},
+		buildVariants: poissonRateVariants,
+	},
+	{
+		Key:           "poisson-rate-prefix",
+		Name:          "Poisson Rate Sweep (shared prefix)",
+		Description:   "Open-loop Poisson arrivals for KV-aware routing: 5000-token prompts with an 80% shared prefix (20 groups) / OSL 128, one step per request rate {1,2,4,8,16}. Each step: 30 s warmup, then at least 120 s and 300 requests measured. Goodput targets TTFT 2000 ms, ITL 200 ms.",
+		Tags:          []string{"synthetic", "open-loop", "prefix-cache"},
+		buildVariants: poissonPrefixVariants,
+	},
+	{
+		Key:           "poisson-rate-agentic",
+		Name:          "Poisson Rate Sweep (agentic long context)",
+		Description:   "Open-loop Poisson arrivals for cache-aware routing on agent traffic: 300 sessions sharing a 16000-token context, 1000 new tokens / OSL 64 per request, one step per request rate {8,16,24,32}. The shared contexts exceed the KV cache of several replicas, so run it against several replicas. Each step: 30 s warmup, then at least 120 s and 300 requests measured. Goodput targets TTFT 2000 ms, ITL 200 ms.",
+		Tags:          []string{"synthetic", "open-loop", "prefix-cache", "agentic"},
+		buildVariants: poissonAgenticVariants,
 	},
 	{
 		Key:           "mooncake",
@@ -504,6 +601,7 @@ func expandForgeScenario(key string, base jumphost.AiperfConfig) ([]forgeScenari
 		if base.Timeout > 0 {
 			cfg.Timeout = base.Timeout
 		}
+		cfg.FitTimeoutToDuration()
 	}
 
 	return children, nil

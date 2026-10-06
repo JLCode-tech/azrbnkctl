@@ -90,6 +90,7 @@ var (
 	flagBenchResetCache           bool   // --reset-cache: cold-redeploy SageMaker endpoint between scenarios
 	flagBenchSynthetic            bool   // --synthetic: benchmark simulated vLLM endpoint (llm-d-inference-sim)
 	flagBenchAgentName            string // --agent-name: name of the benchmark agent in forge
+	flagBenchAgentToken           string // --forge-agent-token: explicit agent token
 )
 
 var benchmarkCmd = &cobra.Command{
@@ -249,6 +250,10 @@ Has no effect when --scenario has only one key.`)
 	// Synthetic inference simulation (llm-d-inference-sim)
 	f.BoolVar(&flagBenchSynthetic, "synthetic", false,
 		"benchmark a synthetic/simulated vLLM inference endpoint (e.g. llm-d-inference-sim on CPU) without requiring GPU hardware")
+
+	f.StringVar(&flagBenchAgentToken, "forge-agent-token", "",
+		"forge agent authentication token; overrides AZRBNKCTL_FORGE_AGENT_TOKEN and forge_link.json")
+	bindGenAIFlags(f)
 }
 
 func init() {
@@ -267,7 +272,21 @@ func init() {
 // out the real SSH call without replacing the jumphost package's internal seam.
 var runAiperfFn = jumphost.RunAiperf
 
+// executeBenchmarkRun scrapes the configured metrics endpoints, runs aiperf
+// (falling back to a synthetic result with --synthetic), scrapes again and
+// attaches the GenAI metrics of the run to the result.
 func executeBenchmarkRun(ctx context.Context, runOpts jumphost.AiperfRunOptions) (*jumphost.AiperfResult, error) {
+	before := collectGenAIScrapes(ctx, runOpts.ProbeOptions)
+	result, err := executeAiperf(ctx, runOpts)
+	if err != nil {
+		return nil, err
+	}
+	after := collectGenAIScrapes(ctx, runOpts.ProbeOptions)
+	attachGenAI(result, before, after)
+	return result, nil
+}
+
+func executeAiperf(ctx context.Context, runOpts jumphost.AiperfRunOptions) (*jumphost.AiperfResult, error) {
 	result, err := runAiperfFn(ctx, runOpts)
 	if err == nil {
 		return result, nil
@@ -350,6 +369,29 @@ func executeBenchmarkRun(ctx context.Context, runOpts jumphost.AiperfRunOptions)
 			"inter_token_latency": {"unit": "ms", "mean": 11.5, "p50": 9.5, "p90": 17.0, "p99": 23.0}
 		}`, cfg.Model, targetVIP, reqs, reqs, rps, tps),
 	}, nil
+}
+
+func effectiveAgentToken(agentName string) string {
+	if flagBenchAgentToken != "" {
+		return flagBenchAgentToken
+	}
+	if tok := os.Getenv("AZRBNKCTL_FORGE_AGENT_TOKEN"); tok != "" {
+		return tok
+	}
+	tok, _ := forge.ReadAgentToken(resolveWorkspaceDir(), flagBenchForgeURL, agentName)
+	return tok
+}
+
+func resolveWorkspaceDir() string {
+	if flagBenchConfig != "" {
+		if cl, err := intent.Load(flagBenchConfig); err == nil {
+			return cl.StateDir()
+		}
+	}
+	if flagBenchWorkspace != "" {
+		return fmt.Sprintf(".azrbnkctl/%s", flagBenchWorkspace)
+	}
+	return ".azrbnkctl"
 }
 
 // checkServedModelFn is the injectable seam for CheckServedModel — allows CLI

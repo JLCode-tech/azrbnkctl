@@ -8,6 +8,7 @@ package cli
 
 import (
 	"testing"
+	"time"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/jumphost"
 )
@@ -743,4 +744,28 @@ func assertExtraInputsContain(t *testing.T, inputs []string, want string, idx in
 		}
 	}
 	t.Errorf("[%d] ExtraInputs %v does not contain %q", idx, inputs, want)
+}
+
+// TestExpandForgeScenario_Poisson pins the open-loop sweep to forge's
+// benchmark_scenarios.py values: rates, labels, durations and timeouts.
+func TestExpandForgeScenario_Poisson(t *testing.T) {
+	children, err := expandForgeScenario("poisson-rate", jumphost.AiperfConfig{Model: "llama3", Timeout: 5 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(children) != 5 || children[0].VariantLabel != "2rps" || children[4].VariantLabel != "32rps" {
+		t.Fatalf("steps = %+v", children)
+	}
+	c := children[0].Config
+	if c.RequestRate != 2 || c.ArrivalPattern != "poisson" || c.BenchmarkDuration != 150 || c.WarmupDuration != 30 ||
+		c.Concurrency != 0 || c.NumRequests != 0 || c.Model != "llama3" || c.RandomSeed != 42 {
+		t.Errorf("2 rps step = %+v", c)
+	}
+	if want := (30+150+30)*time.Second + 5*time.Minute; c.Timeout != want {
+		t.Errorf("timeout = %v, want %v (warmup + duration + grace + start-up)", c.Timeout, want)
+	}
+	prefix, _ := expandForgeScenario("poisson-rate-prefix", jumphost.AiperfConfig{})
+	if p := prefix[0].Config; p.RequestRate != 1 || p.PrefixPromptLength != 4000 || p.NumPrefixPrompts != 20 || p.BenchmarkDuration != 300 {
+		t.Errorf("prefix 1 rps step = %+v", p)
+	}
 }

@@ -112,7 +112,23 @@ func (s *objectGraphServer) handler(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusCreated
 		}
+		// A 409 only applies to names Forge already holds (existingTargets),
+		// so a retry under another name is created like the real backend does.
+		if status == http.StatusConflict {
+			var posted map[string]any
+			_ = json.Unmarshal(raw, &posted)
+			taken := false
+			for _, t := range s.existingTargets {
+				if t["name"] == posted["name"] {
+					taken = true
+				}
+			}
+			if !taken {
+				status = http.StatusCreated
+			}
+		}
 		w.WriteHeader(status)
+
 		if status == http.StatusCreated {
 			var body map[string]any
 			_ = json.Unmarshal(raw, &body)

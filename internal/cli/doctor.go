@@ -13,6 +13,7 @@ var (
 	flagDoctorSubscription string
 	flagDoctorLocation     string
 	flagDoctorStrict       bool
+	flagDoctorBackend      string
 )
 
 var doctorCmd = &cobra.Command{
@@ -26,7 +27,8 @@ var doctorCmd = &cobra.Command{
 
 Example:
   azrbnkctl doctor
-  azrbnkctl doctor --subscription-id 00000000-0000-0000-0000-000000000000 --location eastus2 --strict`,
+  azrbnkctl doctor --subscription-id 00000000-0000-0000-0000-000000000000 --location eastus2 --strict
+  azrbnkctl doctor --backend k8s`,
 	RunE: runDoctor,
 }
 
@@ -34,6 +36,7 @@ func init() {
 	doctorCmd.Flags().StringVar(&flagDoctorSubscription, "subscription-id", "", "Azure Subscription ID to verify")
 	doctorCmd.Flags().StringVar(&flagDoctorLocation, "location", "", "Azure location/region to check")
 	doctorCmd.Flags().BoolVar(&flagDoctorStrict, "strict", false, "Fail with non-zero exit if any warnings are raised")
+	doctorCmd.Flags().StringVar(&flagDoctorBackend, "backend", "", "Run doctor checks against a specific backend (e.g. k8s)")
 	rootCmd.AddCommand(doctorCmd)
 }
 
@@ -51,6 +54,13 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	}
 
 	results := doctor.Run(ctx, cfg)
+	if flagDoctorBackend != "" {
+		results = append(results, runBackendChecks(ctx, flagDoctorBackend)...)
+	}
+	if c, ok := runDNSProbeCheck(ctx, ""); ok {
+		results = append(results, c)
+	}
+
 	if err := doctor.PrintResults(out, results); err != nil {
 		return err
 	}

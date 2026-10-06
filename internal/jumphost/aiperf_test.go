@@ -21,7 +21,7 @@ func TestBuildAiperfCmd_DefaultsAndRequiredFlags(t *testing.T) {
 		},
 		Config: jumphost.AiperfConfig{
 			Model:      "llama3",
-			HostHeader: "azrbnkctl-aiinference.local",
+			HostHeader: "awsbnkctl-aiinference.local",
 		},
 	}
 
@@ -38,7 +38,7 @@ func TestBuildAiperfCmd_DefaultsAndRequiredFlags(t *testing.T) {
 		"--output-tokens-mean", "128",
 		"--tokenizer",
 		"NousResearch/Meta-Llama-3-8B-Instruct",
-		"--header", "Host:azrbnkctl-aiinference.local",
+		"--header", "Host:awsbnkctl-aiinference.local",
 		"--artifact-dir",
 		"--ui", "none",
 		"cat",

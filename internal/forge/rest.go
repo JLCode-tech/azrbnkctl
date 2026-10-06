@@ -62,11 +62,6 @@ func isConflictHTTP(err error) bool {
 		(herr.StatusCode == http.StatusBadRequest && strings.Contains(herr.Body, "already exists"))
 }
 
-// Is404 returns true if err indicates a 404 response.
-func Is404(err error) bool {
-	return is404(err)
-}
-
 // RegisterREST executes registration against Forge's REST API.
 func RegisterREST(ctx context.Context, restURL string, req RegisterRequest, creds RestCreds) (RegisterResult, error) {
 	if req.WorkspaceName == "" {

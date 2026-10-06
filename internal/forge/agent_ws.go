@@ -23,12 +23,28 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// WSAuthError represents an authentication failure from Forge: an HTTP 401/403
+// response during WebSocket dial, or a WebSocket close frame with code 4401/4403.
+type WSAuthError struct {
+	StatusCode int
+	Body       string
+	IsClose    bool
+}
+
+func (e *WSAuthError) Error() string {
+	if e.IsClose {
+		return fmt.Sprintf("websocket close code %d: %s", e.StatusCode, e.Body)
+	}
+	return fmt.Sprintf("dial ws auth rejected (status %d): %s", e.StatusCode, e.Body)
+}
 
 // DefaultHeartbeatInterval is how often the agent sends heartbeats to Forge.
 const DefaultHeartbeatInterval = 15 * time.Second
@@ -47,7 +63,7 @@ type AgentWorkerOptions struct {
 	RestURL string
 	// Creds are the Forge REST credentials.
 	Creds RestCreds
-	// AgentName is the name of the agent in Forge (e.g. "azrbnkctl-jumphost-bnk-singapore").
+	// AgentName is the name of the agent in Forge (e.g. "awsbnkctl-jumphost-bnk-singapore").
 	AgentName string
 	// Hostname is the host/instance-id reported to Forge on registration.
 	Hostname string
@@ -59,6 +75,10 @@ type AgentWorkerOptions struct {
 	Capabilities []string
 	// HeartbeatInterval is the heartbeat cadence (default: 15s).
 	HeartbeatInterval time.Duration
+	// AgentToken optionally overrides automatic agent token resolution (env > yaml > mint).
+	AgentToken string
+	// WorkspaceDir is the workspace directory where forge_agent_token.json is persisted.
+	WorkspaceDir string
 	// RunHandler executes a benchmark run when commanded by Forge.
 	RunHandler RunHandler
 	// CancelHandler cancels an in-flight run.
@@ -69,10 +89,12 @@ type AgentWorkerOptions struct {
 
 // BenchmarkAgentWorker manages the persistent connection to Forge.
 type BenchmarkAgentWorker struct {
-	opts    AgentWorkerOptions
-	agentID int
-	token   string
-	wsBase  string
+	opts          AgentWorkerOptions
+	agentID       int
+	operatorToken string
+	token         string
+	tokenSource   TokenSource
+	wsBase        string
 
 	mu        sync.Mutex
 	conn      *websocket.Conn
@@ -119,12 +141,20 @@ func (w *BenchmarkAgentWorker) IsConnected() bool {
 func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 	base := strings.TrimRight(w.opts.RestURL, "/")
 
-	// 1. Authenticate to Forge
-	token, err := restLogin(ctx, base, w.opts.Creds.restUsername(), w.opts.Creds.restPassword())
-	if err != nil {
-		return fmt.Errorf("forge agent login: %w", err)
+	// 1. Authenticate to Forge. An explicit agent token is enough to
+	// re-register its own agent, so no operator login is needed then (the
+	// token cannot be re-minted without one; a rejected token ends the daemon).
+	var token string
+	if w.opts.AgentToken == "" {
+		var err error
+		token, err = restLogin(ctx, base, w.opts.Creds.restUsername(), w.opts.Creds.restPassword())
+		if err != nil {
+			return fmt.Errorf("forge agent login: %w", err)
+		}
+		w.mu.Lock()
+		w.operatorToken = token
+		w.mu.Unlock()
 	}
-	w.token = token
 
 	// 2. Register/upsert the agent record
 	agentResp, err := RegisterBenchmarkAgent(ctx, BenchmarkAgentOptions{
@@ -135,6 +165,7 @@ func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 		IPAddress:    w.opts.IPAddress,
 		Tags:         w.opts.Tags,
 		Capabilities: w.opts.Capabilities,
+		Token:        w.opts.AgentToken,
 	})
 	if err != nil {
 		return fmt.Errorf("forge agent register: %w", err)
@@ -145,6 +176,24 @@ func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 	w.mu.Unlock()
 
 	w.opts.Logger("Registered as Forge BenchmarkAgent #%d (%s)", agentResp.ID, agentResp.Name)
+
+	// 3. Acquire agent token (env > yaml > cache > mint)
+	tokenRes, err := AcquireAgentToken(ctx, AcquireAgentTokenOptions{
+		RestURL:       base,
+		OperatorToken: token,
+		AgentID:       agentResp.ID,
+		AgentName:     w.opts.AgentName,
+		ExplicitToken: w.opts.AgentToken,
+		WorkspaceDir:  w.opts.WorkspaceDir,
+	})
+	if err != nil {
+		return err
+	}
+
+	w.mu.Lock()
+	w.token = tokenRes.Token
+	w.tokenSource = tokenRes.Source
+	w.mu.Unlock()
 
 	// Determine WS base URL
 	wsScheme := "ws"
@@ -157,7 +206,7 @@ func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 	}
 	w.wsBase = fmt.Sprintf("%s://%s", wsScheme, u.Host)
 
-	// 3. Connect loop with backoff
+	// 4. Connect loop with backoff
 	backoff := 2 * time.Second
 	maxBackoff := 30 * time.Second
 
@@ -174,6 +223,24 @@ func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 		}
 
 		if connErr != nil {
+			var authErr *WSAuthError
+			if errors.As(connErr, &authErr) {
+				w.mu.Lock()
+				src := w.tokenSource
+				w.mu.Unlock()
+				if src == TokenSourceCached {
+					w.opts.Logger("Forge rejected cached agent token (%v) — re-minting token...", authErr)
+					if remintErr := w.remintAgentToken(ctx); remintErr == nil {
+						// Re-mint succeeded; reconnect immediately without backoff
+						continue
+					} else {
+						w.opts.Logger("Failed to re-mint agent token: %v", remintErr)
+					}
+				}
+				w.logFatalAuthRejection(authErr)
+				return connErr
+			}
+
 			w.opts.Logger("Agent WebSocket disconnected (%v), reconnecting in %v...", connErr, backoff)
 		}
 
@@ -187,6 +254,50 @@ func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (w *BenchmarkAgentWorker) remintAgentToken(ctx context.Context) error {
+	base := strings.TrimRight(w.opts.RestURL, "/")
+	if w.opts.WorkspaceDir != "" {
+		_ = DeleteAgentToken(w.opts.WorkspaceDir, base, w.opts.AgentName)
+	}
+	w.mu.Lock()
+	opToken := w.operatorToken
+	agentID := w.agentID
+	w.mu.Unlock()
+
+	mintResp, err := MintAgentToken(ctx, base, opToken, agentID)
+	if err != nil {
+		return err
+	}
+	if w.opts.WorkspaceDir != "" {
+		_ = WriteAgentToken(w.opts.WorkspaceDir, base, w.opts.AgentName, mintResp.Token, mintResp.ExpiresAt)
+	}
+	w.mu.Lock()
+	w.token = mintResp.Token
+	w.tokenSource = TokenSourceMinted
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *BenchmarkAgentWorker) logFatalAuthRejection(authErr *WSAuthError) {
+	w.mu.Lock()
+	src := string(w.tokenSource)
+	agentID := w.agentID
+	w.mu.Unlock()
+	if src == "" {
+		src = "unknown"
+	}
+	codeStr := fmt.Sprintf("HTTP %d", authErr.StatusCode)
+	if authErr.IsClose {
+		codeStr = fmt.Sprintf("close code %d", authErr.StatusCode)
+	}
+	msg := fmt.Sprintf(
+		"Forge WebSocket authentication rejected (%s): agent #%d rejected using %s token; fix: ensure token has 'agent' role with matching agent_id claim via POST /api/benchmarks/agents/%d/token or set AZRBNKCTL_FORGE_AGENT_TOKEN / cluster.yaml forge.agent_token",
+		codeStr, agentID, src, agentID,
+	)
+	w.opts.Logger("[FATAL] %s", msg)
+	fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 }
 
 // connectAndServe handles a single connection session.
@@ -215,6 +326,13 @@ func (w *BenchmarkAgentWorker) connectAndServe(ctx context.Context) error {
 		if resp != nil {
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				return &WSAuthError{
+					StatusCode: resp.StatusCode,
+					Body:       strings.TrimSpace(string(body)),
+					IsClose:    false,
+				}
+			}
 			return fmt.Errorf("dial ws (status %d): %w: %s", resp.StatusCode, err, string(body))
 		}
 		return fmt.Errorf("dial ws: %w", err)
@@ -260,6 +378,17 @@ func (w *BenchmarkAgentWorker) connectAndServe(ctx context.Context) error {
 		for {
 			_, message, err := conn.ReadMessage()
 			if err != nil {
+				var closeErr *websocket.CloseError
+				if errors.As(err, &closeErr) {
+					if closeErr.Code == 4401 || closeErr.Code == 4403 {
+						recvErrCh <- &WSAuthError{
+							StatusCode: closeErr.Code,
+							Body:       closeErr.Text,
+							IsClose:    true,
+						}
+						return
+					}
+				}
 				recvErrCh <- err
 				return
 			}
