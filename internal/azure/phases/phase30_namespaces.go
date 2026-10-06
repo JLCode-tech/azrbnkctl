@@ -86,8 +86,34 @@ func Phase30Namespaces(ctx context.Context, cl *intent.Cluster, st *state.State,
 		}
 	}
 
+	// Apply CoreDNS custom configuration for f5-bnk StatefulSet endpoint resolution
+	if err := applyCoreDNSCustomConfig(ctx, applier); err != nil {
+		fmt.Fprintf(os.Stderr, "[phase 30] warn: applying coredns-custom configmap: %v\n", err)
+	}
+
 	_ = metav1.Now()
 	fmt.Fprintln(os.Stderr, "[phase 30] namespaces OK")
+	return nil
+}
+
+func applyCoreDNSCustomConfig(ctx context.Context, applier *k8s.Applier) error {
+	cmObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "coredns-custom",
+				"namespace": "kube-system",
+			},
+			"data": map[string]interface{}{
+				"f5-bnk.server": "f5-bnk.svc.cluster.local:53 {\n    errors\n    cache 30\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n        pods insecure\n        fallthrough in-addr.arpa ip6.arpa\n        endpoint_pod_names\n    }\n}\n",
+			},
+		},
+	}
+	if _, err := applier.Apply(ctx, cmObj, true); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "[phase 30] coredns-custom ConfigMap applied to kube-system (endpoint_pod_names enabled for f5-bnk)")
 	return nil
 }
 

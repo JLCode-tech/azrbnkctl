@@ -58,7 +58,7 @@
 | **33** | `cwc-certs` | Apply ClusterIssuers and verify `ext-ca` certificate issuance. |
 | **34** | `cneinstance` | Render and apply `CNEInstance` custom resource with discovered PCI addresses. |
 | **35** | `license` | Render and apply F5 BNK License CR from JWT secret. |
-| **36** | `gateway-api` | Apply GatewayClass (`f5-cne-gateway-class`) to enable Kubernetes Gateway API routing. |
+| **36** | `gateway-api` | Apply GatewayClass (`<cluster-name>-gatewayclass`) to enable Kubernetes Gateway API routing. |
 | **37** | `vlans-routes` | Render and apply F5SPKVlan CRs and static dataplane routes. |
 | **40** | `activation` | Wait for CNEInstance readiness, FLO reconciliation, and TMM pod status. |
 | **50** | `egress` | Configure and verify egress test client forwarding through F5 TMM. |

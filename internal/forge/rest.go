@@ -45,6 +45,23 @@ func (c RestCreds) restPassword() string {
 	return "changeme"
 }
 
+// benchmarkHTTPDoFn is the single injectable HTTP transport seam used by all
+// forge REST operations (lifecycle, agents, targets, proxies, configs, results).
+// Default: http.DefaultClient.Do. Tests replace it via the BenchmarkHTTPDoFn
+// export in benchmark_export_test.go.
+var benchmarkHTTPDoFn func(*http.Request) (*http.Response, error) = http.DefaultClient.Do
+
+// isConflictHTTP returns true if err represents an HTTP 409 Conflict
+// or HTTP 400 Bad Request with "already exists" in the response body.
+func isConflictHTTP(err error) bool {
+	var herr *restHTTPErr
+	if !errors.As(err, &herr) {
+		return false
+	}
+	return herr.StatusCode == http.StatusConflict ||
+		(herr.StatusCode == http.StatusBadRequest && strings.Contains(herr.Body, "already exists"))
+}
+
 // RegisterREST executes registration against Forge's REST API.
 func RegisterREST(ctx context.Context, restURL string, req RegisterRequest, creds RestCreds) (RegisterResult, error) {
 	if req.WorkspaceName == "" {
@@ -109,10 +126,10 @@ func UnregisterREST(ctx context.Context, restURL string, link *Link, creds RestC
 		return fmt.Errorf("forge REST login: %w", err)
 	}
 
-	if err := restDeleteCluster(ctx, base, token, link.ProjectID, link.ClusterID); err != nil && !is404(err) {
+	if err := restDeleteCluster(ctx, base, token, link.ProjectID, link.ClusterID); err != nil && !Is404(err) {
 		return fmt.Errorf("forge REST delete cluster: %w", err)
 	}
-	if err := restDeleteProject(ctx, base, token, link.ProjectID); err != nil && !is404(err) {
+	if err := restDeleteProject(ctx, base, token, link.ProjectID); err != nil && !Is404(err) {
 		return fmt.Errorf("forge REST delete project: %w", err)
 	}
 	return nil
@@ -134,7 +151,7 @@ func UnregisterRESTByName(ctx context.Context, restURL, clusterName string, cred
 	cluster, err := restFindClusterByName(ctx, base, token, proj.ID, clusterName)
 	switch {
 	case err == nil:
-		if derr := restDeleteCluster(ctx, base, token, proj.ID, cluster.ID); derr != nil && !is404(derr) {
+		if derr := restDeleteCluster(ctx, base, token, proj.ID, cluster.ID); derr != nil && !Is404(derr) {
 			return fmt.Errorf("forge REST delete cluster: %w", derr)
 		}
 	case errors.Is(err, os.ErrNotExist):
@@ -143,7 +160,7 @@ func UnregisterRESTByName(ctx context.Context, restURL, clusterName string, cred
 		return err
 	}
 
-	if err := restDeleteProject(ctx, base, token, proj.ID); err != nil && !is404(err) {
+	if err := restDeleteProject(ctx, base, token, proj.ID); err != nil && !Is404(err) {
 		return fmt.Errorf("forge REST delete project: %w", err)
 	}
 	return nil
@@ -209,8 +226,7 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 	}
 	err := restPost(ctx, base+"/api/projects", token, body, &resp)
 	if err != nil {
-		var herr *restHTTPErr
-		if errors.As(err, &herr) && herr.StatusCode == http.StatusConflict {
+		if isConflictHTTP(err) {
 			return restFindProjectByName(ctx, base, token, req.ProjectName)
 		}
 		return restProject{}, err
@@ -260,11 +276,12 @@ type restCluster struct {
 }
 
 func restCreateCluster(ctx context.Context, base, token string, projectID int, req RegisterRequest) (restCluster, error) {
+	encodedKubeconfig := base64.StdEncoding.EncodeToString(req.Kubeconfig)
 	body := map[string]any{
 		"name":           req.ClusterName,
 		"cloud_provider": "azure",
 		"region":         req.Region,
-		"kubeconfig":     base64.StdEncoding.EncodeToString(req.Kubeconfig),
+		"kubeconfig":     encodedKubeconfig,
 	}
 	url := fmt.Sprintf("%s/api/projects/%d/k8s/clusters", base, projectID)
 
@@ -277,15 +294,14 @@ func restCreateCluster(ctx context.Context, base, token string, projectID int, r
 	}
 	err := restPost(ctx, url, token, body, &resp)
 	if err != nil {
-		var herr *restHTTPErr
-		if errors.As(err, &herr) && herr.StatusCode == http.StatusConflict {
+		if isConflictHTTP(err) {
 			existing, findErr := restFindClusterByName(ctx, base, token, projectID, req.ClusterName)
 			if findErr != nil {
 				return restCluster{}, fmt.Errorf("409 conflict but cluster lookup failed: %w", findErr)
 			}
 			updateURL := fmt.Sprintf("%s/api/projects/%d/k8s/clusters/%d", base, projectID, existing.ID)
 			updateBody := map[string]any{
-				"kubeconfig": base64.StdEncoding.EncodeToString(req.Kubeconfig),
+				"kubeconfig": encodedKubeconfig,
 				"region":     req.Region,
 			}
 			var updated restCluster
@@ -324,7 +340,7 @@ func restFindClusterByName(ctx context.Context, base, token string, projectID in
 	url := fmt.Sprintf("%s/api/projects/%d/k8s/clusters", base, projectID)
 	var list []restCluster
 	if err := restGet(ctx, url, token, &list); err != nil {
-		return restCluster{}, fmt.Errorf("list clusters in project %d: %w", projectID, err)
+		return restCluster{}, fmt.Errorf("list clusters: %w", err)
 	}
 	for _, c := range list {
 		if c.Name == name {
@@ -346,67 +362,91 @@ func restDeleteProject(ctx context.Context, base, token string, projectID int) e
 
 // ── HTTP verbs ────────────────────────────────────────────────────────────────
 
-var restHTTPClient = &http.Client{Timeout: 30 * time.Second}
-
+// restPost sends a POST request with JSON body and decodes the JSON response
+// into out. On HTTP status >= 400 returns *restHTTPErr. Uses the unified
+// benchmarkHTTPDoFn transport seam.
 func restPost(ctx context.Context, url, token string, body, out any) error {
-	return restDo(ctx, http.MethodPost, url, token, body, out)
+	req, err := newRESTRequest(ctx, http.MethodPost, url, token, body)
+	if err != nil {
+		return err
+	}
+	return doRESTRequest(req, url, out)
 }
 
-func restGet(ctx context.Context, url, token string, out any) error {
-	return restDo(ctx, http.MethodGet, url, token, nil, out)
-}
-
+// restPut mirrors restPost but uses HTTP PUT.
 func restPut(ctx context.Context, url, token string, body, out any) error {
-	return restDo(ctx, http.MethodPut, url, token, body, out)
+	req, err := newRESTRequest(ctx, http.MethodPut, url, token, body)
+	if err != nil {
+		return err
+	}
+	return doRESTRequest(req, url, out)
 }
 
-func restDelete(ctx context.Context, url, token string) error {
-	return restDo(ctx, http.MethodDelete, url, token, nil, nil)
+// restGet sends a GET request and decodes the JSON response into out.
+func restGet(ctx context.Context, url, token string, out any) error {
+	req, err := newRESTRequest(ctx, http.MethodGet, url, token, nil)
+	if err != nil {
+		return err
+	}
+	return doRESTRequest(req, url, out)
 }
 
-func restDo(ctx context.Context, method, url, token string, body, out any) error {
-	var r io.Reader
+// newRESTRequest builds an *http.Request with JSON body (when body != nil) and
+// Authorization header.
+func newRESTRequest(ctx context.Context, method, url, token string, body any) (*http.Request, error) {
+	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("marshal request: %w", err)
+			return nil, fmt.Errorf("marshal request body: %w", err)
 		}
-		r = bytes.NewReader(b)
+		reader = bytes.NewReader(b)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, r)
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
-		return fmt.Errorf("new request %s %s: %w", method, url, err)
+		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	return req, nil
+}
 
-	resp, err := restHTTPClient.Do(req)
+// doRESTRequest executes req via benchmarkHTTPDoFn, checks for HTTP errors, and
+// decodes the JSON response into out (when out != nil and body is non-empty).
+func doRESTRequest(req *http.Request, url string, out any) error {
+	resp, err := benchmarkHTTPDoFn(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, url, err)
+		return fmt.Errorf("http %s %s: %w", req.Method, url, err)
 	}
 	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
+	respBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return &restHTTPErr{StatusCode: resp.StatusCode, URL: url, Body: truncateREST(string(respBytes), 400)}
 	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &restHTTPErr{
-			StatusCode: resp.StatusCode,
-			URL:        url,
-			Body:       string(respBytes),
-		}
-	}
-
 	if out != nil && len(respBytes) > 0 {
 		if err := json.Unmarshal(respBytes, out); err != nil {
-			return fmt.Errorf("unmarshal %s %s: %w (body: %s)", method, url, err, string(respBytes))
+			return fmt.Errorf("decode response from %s: %w", url, err)
 		}
 	}
 	return nil
+}
+
+// restDelete sends a DELETE request and returns *restHTTPErr on status >= 400.
+func restDelete(ctx context.Context, url, token string) error {
+	req, err := newRESTRequest(ctx, http.MethodDelete, url, token, nil)
+	if err != nil {
+		return err
+	}
+	return doRESTRequest(req, url, nil)
+}
+
+func truncateREST(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

@@ -15,10 +15,14 @@ import (
 
 // Phase36GatewayAPI applies the GatewayClass for F5 BNK Gateway API.
 func Phase36GatewayAPI(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azure.Clients, dryRun bool) error {
-	fmt.Fprintln(os.Stderr, "[phase 36] gateway-api: applying GatewayClass f5-cne-gateway-class")
+	gwcName := cl.Metadata.Name + "-gatewayclass"
+	if cl.Metadata.Name == "" {
+		gwcName = "f5-cne-gateway-class"
+	}
+	fmt.Fprintf(os.Stderr, "[phase 36] gateway-api: applying GatewayClass %s\n", gwcName)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 36] [dry-run] would apply GatewayClass f5-cne-gateway-class")
+		fmt.Fprintf(os.Stderr, "[phase 36] [dry-run] would apply GatewayClass %s\n", gwcName)
 		return nil
 	}
 
@@ -37,10 +41,11 @@ func Phase36GatewayAPI(ctx context.Context, cl *intent.Cluster, st *state.State,
 			"apiVersion": "gateway.networking.k8s.io/v1",
 			"kind":       "GatewayClass",
 			"metadata": map[string]interface{}{
-				"name": "f5-cne-gateway-class",
+				"name": gwcName,
 			},
 			"spec": map[string]interface{}{
-				"controllerName": "f5.com/cne-gateway-controller",
+				"controllerName": "f5.com/f5-bnk-f5-cne-controller",
+				"description":    "F5 BIG-IP Kubernetes Gateway",
 			},
 		},
 	}

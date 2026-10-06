@@ -73,6 +73,28 @@ spec:
 apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
+  name: route-cluster-svcs
+  namespace: f5-bnk
+spec:
+  destination: {{ .ServiceCidrDest }}
+  prefixLen: {{ .ServiceCidrPrefix }}
+  gateway: {{ .IntGwIP }}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-cluster-pods
+  namespace: f5-bnk
+spec:
+  destination: {{ .PodCidrDest }}
+  prefixLen: {{ .PodCidrPrefix }}
+  gateway: {{ .IntGwIP }}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
   name: route-default-egress
   namespace: f5-bnk
 spec:
@@ -81,6 +103,28 @@ spec:
   gateway: {{ .IntGwIP }}
   type: gateway
 {{- else }}
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-cluster-svcs
+  namespace: f5-bnk
+spec:
+  destination: {{ .ServiceCidrDest }}
+  prefixLen: {{ .ServiceCidrPrefix }}
+  gateway: {{ .ExtGwIP }}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: route-cluster-pods
+  namespace: f5-bnk
+spec:
+  destination: {{ .PodCidrDest }}
+  prefixLen: {{ .PodCidrPrefix }}
+  gateway: {{ .ExtGwIP }}
+  type: gateway
 ---
 apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute

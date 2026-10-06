@@ -14,6 +14,25 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// InClusterKubeconfigSentinel is the magic value for kubeconfigPath that
+// triggers rest.InClusterConfig() lookup. Used when azrbnkctl runs inside
+// a cluster (the test --backend k8s probe Job) and gets its credentials
+// from the projected service account.
+const InClusterKubeconfigSentinel = "in-cluster"
+
+// Client wraps a Kubernetes clientset and the REST config used to build
+// it. One Client per command invocation; not safe for concurrent reuse.
+type Client struct {
+	config    *rest.Config
+	clientset *kubernetes.Clientset
+}
+
+// Clientset returns the underlying client-go clientset.
+func (c *Client) Clientset() *kubernetes.Clientset { return c.clientset }
+
+// RESTConfig returns the rest.Config used to construct the clientset.
+func (c *Client) RESTConfig() *rest.Config { return c.config }
+
 // DefaultKubeconfigPath returns the default kubeconfig location ($KUBECONFIG or ~/.kube/config).
 func DefaultKubeconfigPath() string {
 	if v := os.Getenv("KUBECONFIG"); v != "" {
@@ -33,6 +52,54 @@ func DefaultKubeconfigPath() string {
 		return def
 	}
 	return ""
+}
+
+// BuildRESTConfig builds a rest.Config from a kubeconfig path or in-cluster sentinel.
+func BuildRESTConfig(kubeconfigPath string) (*rest.Config, error) {
+	if kubeconfigPath == InClusterKubeconfigSentinel {
+		cfg, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("in-cluster config: %w", err)
+		}
+		return cfg, nil
+	}
+	if kubeconfigPath == "" {
+		kubeconfigPath = DefaultKubeconfigPath()
+	}
+	if kubeconfigPath == "" {
+		return nil, errors.New("no kubeconfig found: set $KUBECONFIG or configure AKS credentials")
+	}
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading kubeconfig %s: %w", kubeconfigPath, err)
+	}
+	return cfg, nil
+}
+
+// BuildClientset returns a typed client for core + apps + batch + etc.
+func BuildClientset(kubeconfigPath string) (kubernetes.Interface, error) {
+	cfg, err := BuildRESTConfig(kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating clientset: %w", err)
+	}
+	return cs, nil
+}
+
+// BuildDynamicClient returns a dynamic.Interface for unstructured access.
+func BuildDynamicClient(kubeconfigPath string) (dynamic.Interface, error) {
+	cfg, err := BuildRESTConfig(kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+	dc, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating dynamic client: %w", err)
+	}
+	return dc, nil
 }
 
 // BuildRESTConfigFromKubeconfig builds a rest.Config from a local kubeconfig file + context.

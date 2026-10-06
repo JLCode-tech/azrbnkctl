@@ -34,7 +34,7 @@ spec:
   pseudoCNI:
     enabled: true
   coreCollection:
-    enabled: false
+    enabled: true
   intelligentLB:
     enabled: true
   tmmReplicas: 1
@@ -50,22 +50,6 @@ spec:
       env:
         - name: TMM_DEFAULT_MTU
           value: "{{ .TmmMtu }}"
-    crdConversion:
-      env:
-        - name: PATH_CERTS
-          value: /tls/crdconversion/webhook/svr
-        - name: PATH_KEYS
-          value: /tls/crdconversion/webhook/svr
-        - name: SRV_CERT
-          value: tls.crt
-        - name: SRV_KEY
-          value: tls.key
-        - name: CONTAINER_IMAGE_VERSION
-          value: "v1.250.3"
-        - name: NAMESPACE
-          value: "f5-utils"
-        - name: NODE
-          value: "aks-system"
     tmm:
       resources:
         limits:

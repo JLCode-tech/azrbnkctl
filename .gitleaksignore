@@ -2,3 +2,4 @@
 # CI security-audit scans full history; ignore false-positive placeholder password in initial commit.
 5a14d38f36011674fd25628b1f8ca0b55cc85c87:internal/cli/forge.go:hashicorp-tf-password:169
 2af4b06cea49c1f20c521422440a82c5687df9c6:internal/forge/template.go:hashicorp-tf-password:20
+59735a9ec04a4c1654d4ede69d6653d1ace62f54:internal/jumphost/staging_test.go:private-key:316

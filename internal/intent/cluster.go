@@ -72,6 +72,9 @@ type SubnetsSpec struct {
 	Internal string `yaml:"internal,omitempty"`
 }
 
+// Subnets is an alias for SubnetsSpec.
+type Subnets = SubnetsSpec
+
 // Network defines the VNet CIDR and subnet topology.
 type Network struct {
 	VNetCIDR   string      `yaml:"vnetCidr"`
@@ -138,6 +141,39 @@ type ForgeSpec struct {
 	Password string `yaml:"password,omitempty"`
 	// CredentialTemplateID is the forge credential template to attach to the project.
 	CredentialTemplateID int `yaml:"credentialTemplateId,omitempty"`
+	// Environment is the forge project environment (e.g. "dev", "staging", "prod").
+	// Default "dev".
+	Environment string `yaml:"environment,omitempty"`
+	// ProjectType is the forge project type (e.g. "cloud-azure").
+	// Default "cloud-azure".
+	ProjectType string `yaml:"projectType,omitempty"`
+	// ProjectName is the name of the forge project to register the cluster into.
+	// Defaults to "azrbnkctl-" + workspace.
+	ProjectName string `yaml:"projectName,omitempty"`
+	// AgentToken is the Forge benchmark agent JWT token (role 'agent').
+	// Resolution order: CLI flag > AZRBNKCTL_FORGE_AGENT_TOKEN env > this field.
+	AgentToken string `yaml:"agent_token,omitempty"`
+	// AgentTokenCamel is a fallback alias for camelCase YAML configs (agentToken).
+	AgentTokenCamel string `yaml:"agentToken,omitempty"`
+}
+
+// ResolveAgentToken returns the agent token to use, in priority order:
+//  1. AZRBNKCTL_FORGE_AGENT_TOKEN environment variable
+//  2. f.AgentToken (cluster.yaml forge.agent_token)
+//  3. f.AgentTokenCamel (cluster.yaml forge.agentToken)
+func (f *ForgeSpec) ResolveAgentToken() string {
+	if v := os.Getenv("AZRBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
+		return v
+	}
+	if f != nil {
+		if f.AgentToken != "" {
+			return f.AgentToken
+		}
+		if f.AgentTokenCamel != "" {
+			return f.AgentTokenCamel
+		}
+	}
+	return ""
 }
 
 // DefaultForgeRESTURL is the fallback REST base when forge.url is not set.
@@ -212,10 +248,12 @@ type Cluster struct {
 	Bnk         BnkSpec           `yaml:"bnk"`
 	Egress      EgressSpec        `yaml:"egress,omitempty"`
 	Testing     TestingSpec       `yaml:"testing,omitempty"`
+	AI          *AISpec           `yaml:"ai,omitempty"`
 	Forge       *ForgeSpec        `yaml:"forge,omitempty"`
 	Tags        map[string]string `yaml:"tags,omitempty"`
 
-	Derived Derived `yaml:"-"`
+	Derived    Derived `yaml:"-"`
+	SourcePath string  `yaml:"-"`
 }
 
 // Load reads and validates a cluster.yaml file.
@@ -227,7 +265,12 @@ func Load(path string) (*Cluster, error) {
 	}
 
 	baseDir := filepath.Dir(cleanPath)
-	return LoadBytes(data, baseDir)
+	cl, err := LoadBytes(data, baseDir)
+	if err != nil {
+		return nil, err
+	}
+	cl.SourcePath = cleanPath
+	return cl, nil
 }
 
 // LoadBytes decodes and validates YAML bytes with strict unmarshaling.
@@ -416,6 +459,12 @@ func (c *Cluster) Validate() error {
 		errs = append(errs, fmt.Sprintf("cluster.tmmNodePool.vmSize %q is invalid", c.ClusterSpec.TMMNodePool.VMSize))
 	}
 
+	if c.AI != nil && c.AI.Synthetic != nil {
+		if err := validateSynthetic(c.AI.Synthetic); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
 	}
@@ -444,7 +493,43 @@ func (c *Cluster) StateDir() string {
 	return filepath.Join(".azrbnkctl", c.Metadata.Name)
 }
 
+// DefaultVIP returns the default Gateway VIP for this cluster.
+// Convention: <subnets.external network>.100 — e.g. 10.0.17.0/24 -> 10.0.17.100.
+// Returns an error when network.subnets.external is not set.
+// IsBNKPattern reports whether the cluster pattern deploys BNK data-plane interfaces.
+func (c *Cluster) IsBNKPattern() bool {
+	if c == nil {
+		return false
+	}
+	switch c.Pattern {
+	case PatternExternalOnly, PatternDualInterface, PatternHostDevice:
+		return true
+	default:
+		return false
+	}
+}
+
+// HasInternalInterface reports whether the topology provisions a second data plane interface.
+func (c *Cluster) HasInternalInterface() bool {
+	return c != nil && (c.Pattern == PatternDualInterface || c.Network.Subnets.Internal != "")
+}
+
+// IsReservedGatewayVIPOffset returns true if the host offset falls in the BNK Gateway VIP plan (.100 to .119).
+func IsReservedGatewayVIPOffset(offset int) bool {
+
+	return offset >= 100 && offset <= 119
+}
+
+func (c *Cluster) DefaultVIP() (string, error) {
+
+	if c.Network.Subnets.External == "" {
+		return "", errors.New("network.subnets.external not set; pass --vip explicitly")
+	}
+	return netcalc.Nth(c.Network.Subnets.External, 100)
+}
+
 func (c *Cluster) derive(baseDir string) error {
+
 	c.Derived.ResourceGroupName = c.Metadata.ResourceGroup
 	c.Derived.VNetName = fmt.Sprintf("vnet-%s", c.Metadata.Name)
 	c.Derived.AKSClusterName = fmt.Sprintf("aks-%s", c.Metadata.Name)
@@ -488,4 +573,39 @@ func (c *Cluster) derive(baseDir string) error {
 	}
 
 	return nil
+}
+
+// SelfIPPoolPrefix is the CIDR prefix length for TMM self-IP pools.
+const SelfIPPoolPrefix = 27
+
+const selfIPPoolMask = byte(1<<(32-SelfIPPoolPrefix) - 1)
+
+// SelfIPPoolRange returns the rangeStart/rangeEnd of the self-IP pool for
+// selfIP: the /SelfIPPoolPrefix block that contains it, minus its last address.
+func SelfIPPoolRange(selfIP string) (start, end string, err error) {
+	ip := net.ParseIP(selfIP).To4()
+	if ip == nil {
+		return "", "", fmt.Errorf("self IP %q is not an IPv4 address", selfIP)
+	}
+	first := ip[3] &^ selfIPPoolMask
+	if first == 0 {
+		return "", "", fmt.Errorf("self IP %s falls in the first /%d of its subnet", selfIP, SelfIPPoolPrefix)
+	}
+	start = net.IPv4(ip[0], ip[1], ip[2], first).String()
+	end = net.IPv4(ip[0], ip[1], ip[2], first+selfIPPoolMask-1).String()
+	return start, end, nil
+}
+
+// DeriveSelfIP returns the host-offset IP and prefix length for a /24 CIDR.
+func DeriveSelfIP(cidr string, hostOffset int) (string, int) {
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", 0
+	}
+	prefix, _ := ipnet.Mask.Size()
+	base := ipnet.IP.To4()
+	if base == nil || prefix != 24 || hostOffset < 1 || hostOffset > 254 {
+		return "", prefix
+	}
+	return net.IPv4(base[0], base[1], base[2], byte(hostOffset)).String(), prefix
 }
