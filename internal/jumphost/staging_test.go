@@ -313,7 +313,7 @@ func TestCopyFileViaEICEStdin_ContentViaStdinNotArgv(t *testing.T) {
 	runs := &stdinRunRecord{}
 	defer installStdinSeams(t, mint, pushes, runs, nil)()
 
-	content := []byte("-----BEGIN PRIVATE KEY-----\nfake-key-content-for-test\n-----END PRIVATE KEY-----\n")
+	content := []byte("dummy-test-key-content-for-test-transferred-via-stdin\n")
 	err := jumphost.CopyFileViaEICEStdin(context.Background(), opts(), content, "/home/ec2-user/bigip.pem")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -328,7 +328,7 @@ func TestCopyFileViaEICEStdin_ContentViaStdinNotArgv(t *testing.T) {
 	// The content must travel ONLY on stdin — never in the command string
 	// (which becomes a local ssh argv element, visible in ps), and never
 	// base64-smuggled either.
-	if strings.Contains(cmd, "fake-key-content-for-test") || strings.Contains(cmd, "base64") {
+	if strings.Contains(cmd, "dummy-test-key-content") || strings.Contains(cmd, "base64") {
 		t.Errorf("file content (or a base64 of it) leaked into the command string: %q", cmd)
 	}
 	if runs.stdins[0] != string(content) {
