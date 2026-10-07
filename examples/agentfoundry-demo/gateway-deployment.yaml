@@ -1,3 +1,11 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: bnk-agentfoundry-demo-gatewayclass
+spec:
+  controllerName: f5.com/f5-bnk-f5-cne-controller
+  description: F5 BIG-IP Kubernetes Gateway
+---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -21,11 +29,16 @@ metadata:
   name: bnk-agentfoundry-demo-gateway
   namespace: default
 spec:
-  gatewayClassName: f5-cne-gateway-class
+  gatewayClassName: bnk-agentfoundry-demo-gatewayclass
   listeners:
   - name: http
     protocol: HTTP
     port: 80
+    allowedRoutes:
+      namespaces:
+        from: All
+      kinds:
+      - kind: HTTPRoute
   - name: https
     protocol: HTTPS
     port: 443

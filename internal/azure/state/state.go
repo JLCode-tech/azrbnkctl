@@ -66,6 +66,15 @@ func (s *State) Get(key string) string {
 	return s.data[key]
 }
 
+// All returns a copy of all key-value pairs in state.
+func (s *State) All() map[string]string {
+	out := make(map[string]string, len(s.data))
+	for k, v := range s.data {
+		out[k] = v
+	}
+	return out
+}
+
 // Set stores key=value in memory. Call Save to persist.
 func (s *State) Set(key, value string) {
 	s.data[key] = value

@@ -72,6 +72,8 @@ type CreateProjectRequest struct {
 	CloudProvider         string `json:"cloud_provider,omitempty"` // e.g. "azure"
 	Environment           string `json:"environment,omitempty"`    // default "dev"
 	Region                string `json:"region,omitempty"`
+	AWSProfile            string `json:"aws_profile,omitempty"`
+	AzureSubscriptionID   string `json:"azure_subscription_id,omitempty"`
 	BackendType           string `json:"backend_type,omitempty"` // default "local"
 	Color                 string `json:"color,omitempty"`
 	Icon                  string `json:"icon,omitempty"`
