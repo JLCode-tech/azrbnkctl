@@ -1,7 +1,7 @@
-// Package jumphost provides SSH-via-EICE curl probe utilities for the
-// multi-ENI jumphost model used by scenarios. It is a pure leaf package — it must NOT
-// import internal/cli or internal/scenarios. The CLI layer translates
-// cobra flags into ProbeOptions at the boundary.
+// Package jumphost provides SSH probe utilities for the multi-NIC jumphost
+// model used by scenarios. It is a pure leaf package — it must NOT import
+// internal/cli or internal/scenarios. The CLI layer translates cobra flags into
+// ProbeOptions at the boundary.
 package jumphost
 
 import (
@@ -21,16 +21,20 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// DefaultSSHUser is the default Linux username on Amazon Linux 2 / AL2023 jumphost instances.
-const DefaultSSHUser = "ec2-user"
+// DefaultSSHUser is the default Linux username on Azure jumphost instances.
+const DefaultSSHUser = "azureuser"
 
 // ProbeOptions configures a jumphost curl probe run.
 type ProbeOptions struct {
-	// Region is the AWS region (e.g. "ap-southeast-2").
-	Region string
-	// InstanceID is the jumphost EC2 instance ID (JUMPHOST_INSTANCE_ID).
-	InstanceID string
-	// SourceIP is the jumphost's BNK_EXT ENI IP (JUMPHOST_BNK_EXT_ENI_IP).
+	// Location is the Azure location / region (e.g. "eastus2").
+	Location string
+	// VMName is the Azure VM name.
+	VMName string
+	// ResourceID is the full Azure resource ID of the VM (used for Bastion tunnel).
+	ResourceID string
+	// JumphostIP is the IP address of the jumphost (public IP or private IP reachable from operator).
+	JumphostIP string
+	// SourceIP is the jumphost's BNK_EXT interface IP.
 	// curl --interface uses this so traffic hits the real data path.
 	SourceIP string
 	// VIP is the Gateway VIP to curl.
@@ -39,11 +43,58 @@ type ProbeOptions struct {
 	Iterations int
 	// Timeout is the per-curl timeout. Default 10s.
 	Timeout time.Duration
-	// User is the SSH user on the jumphost. Default DefaultSSHUser ("ec2-user").
+	// User is the SSH user on the jumphost. Default DefaultSSHUser ("azureuser").
 	User string
 	// Hostname sets the HTTP Host header so requests match hostname-scoped
 	// HTTPRoutes. Empty means no Host header (matches no-hostname routes).
 	Hostname string
+	// SSHKeyPath is an optional path to an existing private SSH key.
+	// When empty, an ephemeral ED25519 key is generated.
+	SSHKeyPath string
+	// UseBastionTunnel indicates whether to use Azure Bastion tunneling for SSH.
+	UseBastionTunnel bool
+
+	// Backwards-compatible aliases:
+	// Region is an alias for Location.
+	Region string
+	// InstanceID is an alias for VMName.
+	InstanceID string
+}
+
+// EffectiveLocation returns Location if set, falling back to Region.
+func (p ProbeOptions) EffectiveLocation() string {
+	if p.Location != "" {
+		return p.Location
+	}
+	return p.Region
+}
+
+// EffectiveVMName returns VMName if set, falling back to InstanceID.
+func (p ProbeOptions) EffectiveVMName() string {
+	if p.VMName != "" {
+		return p.VMName
+	}
+	return p.InstanceID
+}
+
+// EffectiveUser returns User if set, falling back to DefaultSSHUser ("azureuser").
+func (p ProbeOptions) EffectiveUser() string {
+	if p.User != "" {
+		return p.User
+	}
+	return DefaultSSHUser
+}
+
+// TargetHost returns the destination host for SSH.
+// JumphostIP takes precedence, then EffectiveVMName, then SourceIP.
+func (p ProbeOptions) TargetHost() string {
+	if p.JumphostIP != "" {
+		return p.JumphostIP
+	}
+	if vm := p.EffectiveVMName(); vm != "" {
+		return vm
+	}
+	return p.SourceIP
 }
 
 // ProbeResult records the outcome of one curl iteration.
@@ -54,13 +105,22 @@ type ProbeResult struct {
 	Err       string  `json:"error,omitempty"`
 }
 
+// prepareProbeKey checks if an existing key path was supplied; otherwise
+// delegates to prepareEICEKeyFn to mint an ephemeral key.
+func prepareProbeKey(ctx context.Context, opts ProbeOptions) (keyPath, pubKeyPath string, cleanup func(), err error) {
+	if opts.SSHKeyPath != "" {
+		pubKey := opts.SSHKeyPath + ".pub"
+		if _, statErr := os.Stat(pubKey); statErr != nil {
+			pubKey = ""
+		}
+		return opts.SSHKeyPath, pubKey, func() {}, nil
+	}
+	return prepareEICEKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName())
+}
+
 // prepareEICEKey mints an ephemeral ED25519 keypair, writes it to temp files,
-// pushes the public half via EC2 Instance Connect, waits 2 s for it to settle,
-// and returns the private-key path, the public-key path, and a cleanup func
-// that removes both files. The caller is responsible for calling cleanup()
-// (typically via defer). The public-key path is exposed so callers that run
-// multiple SSH iterations can re-push the key before each one to reset the
-// EC2 Instance Connect ~60s TTL.
+// pushes the public half via PushSSHPublicKey, and returns the private-key path,
+// the public-key path, and a cleanup func that removes both files.
 func prepareEICEKey(ctx context.Context, region, instanceID string) (keyPath, pubKeyPath string, cleanup func(), err error) {
 	priv, pubAuth, err := GenerateEphemeralED25519()
 	if err != nil {
@@ -108,24 +168,59 @@ func prepareEICEKey(ctx context.Context, region, instanceID string) (keyPath, pu
 		_ = os.Remove(pubFile.Name())
 	}
 
-	if err := PushSSHPublicKey(ctx, region, instanceID, pubFile.Name()); err != nil {
+	if err := pushSSHPublicKeyFn(ctx, region, instanceID, pubFile.Name()); err != nil {
 		cleanupFn()
 		return "", "", func() {}, fmt.Errorf("send-ssh-public-key: %w", err)
 	}
 
-	// Allow the key a moment to settle (EC2 Instance Connect ~60s TTL).
+	// Allow the key a moment to settle.
 	time.Sleep(2 * time.Second)
 
 	return keyFile.Name(), pubFile.Name(), cleanupFn, nil
 }
 
-// RunCurlProbes mints an ephemeral SSH key, pushes it via EC2 Instance
-// Connect, then runs opts.Iterations curls from the jumphost via the
-// EICE tunnel. Returns per-iteration results.
-//
-// Shelling to `aws ec2-instance-connect open-tunnel` + `ssh` reproduces
-// the operator workflow already used for jumphost probing. Requires the `aws` CLI and
-// `ssh` to be on PATH.
+// buildSSHArgs constructs SSH arguments supporting direct SSH (user@targetHost),
+// Azure Bastion proxy commands (az network bastion tunnel --target-resource-id ...),
+// and legacy AWS EICE fallback.
+func buildSSHArgs(user, targetHost, keyPath string, useBastion bool, resourceID, location, remoteCmd string) []string {
+	var args []string
+	if resourceID == "" && strings.HasPrefix(targetHost, "/subscriptions/") {
+		resourceID = targetHost
+	}
+
+	if useBastion || (resourceID != "" && strings.HasPrefix(resourceID, "/subscriptions/")) {
+		if resourceID != "" {
+			proxy := fmt.Sprintf("ProxyCommand=az network bastion tunnel --target-resource-id %s --resource-port 22", resourceID)
+			args = append(args, "-o", proxy)
+		}
+	} else if strings.HasPrefix(targetHost, "i-") {
+		proxy := fmt.Sprintf("ProxyCommand=aws ec2-instance-connect open-tunnel --instance-id %s --region %s", targetHost, location)
+		args = append(args, "-o", proxy)
+	}
+
+	args = append(args,
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "ConnectTimeout=15",
+	)
+	if keyPath != "" {
+		args = append(args, "-i", keyPath)
+	}
+	if user == "" {
+		user = DefaultSSHUser
+	}
+	connectHost := targetHost
+	if strings.HasPrefix(connectHost, "/subscriptions/") {
+		if idx := strings.LastIndex(connectHost, "/"); idx >= 0 {
+			connectHost = connectHost[idx+1:]
+		}
+	}
+	args = append(args, fmt.Sprintf("%s@%s", user, connectHost), remoteCmd)
+	return args
+}
+
+// RunCurlProbes mints an ephemeral SSH key (or uses opts.SSHKeyPath), pushes it,
+// then runs opts.Iterations curls from the jumphost. Returns per-iteration results.
 func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error) {
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
@@ -133,11 +228,12 @@ func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
 	}
-	if opts.User == "" {
-		opts.User = "ec2-user"
-	}
+	user := opts.EffectiveUser()
+	loc := opts.EffectiveLocation()
+	vm := opts.EffectiveVMName()
+	targetHost := opts.TargetHost()
 
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKey(ctx, opts.Region, opts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -145,9 +241,10 @@ func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error
 
 	results := make([]ProbeResult, 0, opts.Iterations)
 	for i := 1; i <= opts.Iterations; i++ {
-		// Re-push the public key before each iteration to reset the ~60s TTL.
-		_ = PushSSHPublicKey(ctx, opts.Region, opts.InstanceID, pubKeyPath)
-		code, secs, perr := SSHCurlViaEICE(ctx, opts.Region, opts.InstanceID, keyPath, opts.SourceIP, opts.VIP, opts.Hostname, opts.Timeout)
+		if pubKeyPath != "" {
+			_ = pushSSHPublicKeyFn(ctx, loc, vm, pubKeyPath)
+		}
+		code, secs, perr := sshCurlProbe(ctx, opts, keyPath, targetHost, user)
 		res := ProbeResult{Iteration: i, HTTPCode: code, Seconds: secs}
 		if perr != nil {
 			res.Err = perr.Error()
@@ -157,26 +254,66 @@ func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error
 	return results, nil
 }
 
-// PushSSHPublicKey sends a public key to the jumphost via EC2 Instance
-// Connect (aws ec2-instance-connect send-ssh-public-key). pubKeyPath must
-// point to a file whose contents begin with "ssh-ed25519 ...".
+// PushSSHPublicKey sends/updates the public key on the target VM.
+// On Azure, it updates the VM user key via `az vm user update` if available,
+// or gracefully no-ops when the CLI isn't available.
+// On AWS instances (instanceID starting with "i-"), it falls back to EC2 Instance Connect.
 func PushSSHPublicKey(ctx context.Context, region, instanceID, pubKeyPath string) error {
-	args := []string{
-		"ec2-instance-connect", "send-ssh-public-key",
-		"--instance-id", instanceID,
-		"--instance-os-user", "ec2-user",
-		"--ssh-public-key", "file://" + pubKeyPath,
-		"--region", region,
+	if strings.HasPrefix(instanceID, "i-") {
+		if _, err := exec.LookPath("aws"); err != nil {
+			return nil
+		}
+		args := []string{
+			"ec2-instance-connect", "send-ssh-public-key",
+			"--instance-id", instanceID,
+			"--instance-os-user", DefaultSSHUser,
+			"--ssh-public-key", "file://" + pubKeyPath,
+			"--region", region,
+		}
+		cmd := exec.CommandContext(ctx, "aws", args...) // #nosec G204 -- fixed aws subcommand with controlled args
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		_ = cmd.Run()
+		return nil
 	}
-	// #nosec G204 -- args are constructed from validated state.env values
-	// (instanceID, region) plus a temp pubkey path we just minted; no caller-
-	// supplied free text reaches the subprocess.
-	cmd := exec.CommandContext(ctx, "aws", args...)
+
+	if _, err := exec.LookPath("az"); err != nil {
+		// CLI not available; gracefully no-op.
+		return nil
+	}
+
+	pubBytes, err := os.ReadFile(pubKeyPath) // #nosec G304 -- local public key path
+	if err != nil {
+		return nil
+	}
+	pubKey := strings.TrimSpace(string(pubBytes))
+	if pubKey == "" {
+		return nil
+	}
+
+	var args []string
+	if strings.HasPrefix(instanceID, "/subscriptions/") {
+		args = []string{
+			"vm", "user", "update",
+			"--ids", instanceID,
+			"--username", DefaultSSHUser,
+			"--ssh-key-value", pubKey,
+		}
+	} else if instanceID != "" {
+		args = []string{
+			"vm", "user", "update",
+			"--name", instanceID,
+			"--username", DefaultSSHUser,
+			"--ssh-key-value", pubKey,
+		}
+	} else {
+		return nil
+	}
+
+	cmd := exec.CommandContext(ctx, "az", args...) // #nosec G204 -- fixed az subcommand with controlled args
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("aws %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
+	_ = cmd.Run()
 	return nil
 }
 
@@ -191,34 +328,30 @@ func buildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
 		hostHdr, sourceIP, timeoutSecs, vip)
 }
 
-// SSHCurlViaEICE opens an EICE tunnel to the jumphost and runs a single
+// SSHCurlViaEICE opens an SSH connection to the jumphost and runs a single
 // curl --interface <sourceIP> http://<vip>/ with the given timeout.
-// When host is non-empty, -H 'Host: <host>' is added so requests match
-// hostname-scoped HTTPRoutes.
-// Returns the HTTP response code, elapsed seconds, and any error.
 func SSHCurlViaEICE(ctx context.Context, region, instanceID, keyPath, sourceIP, vip, host string, timeout time.Duration) (int, float64, error) {
-	proxy := fmt.Sprintf(`ProxyCommand=aws ec2-instance-connect open-tunnel --instance-id %s --region %s`, instanceID, region)
-	remoteCmd := buildCurlCmd(sourceIP, vip, host, int(timeout.Seconds()))
-	args := []string{
-		"-o", proxy,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "ConnectTimeout=15",
-		"-i", keyPath,
-		"ec2-user@" + instanceID,
-		remoteCmd,
+	opts := ProbeOptions{
+		Region:     region,
+		InstanceID: instanceID,
+		SourceIP:   sourceIP,
+		VIP:        vip,
+		Hostname:   host,
+		Timeout:    timeout,
 	}
-	// #nosec G204 -- args are constructed from validated state.env values
-	// (instanceID, region, sourceIP) + a temp private-key path we just minted +
-	// a VIP from cluster.yaml; no caller-supplied free text reaches the subprocess.
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	return sshCurlProbe(ctx, opts, keyPath, opts.TargetHost(), opts.EffectiveUser())
+}
+
+func sshCurlProbe(ctx context.Context, opts ProbeOptions, keyPath, targetHost, user string) (int, float64, error) {
+	remoteCmd := buildCurlCmd(opts.SourceIP, opts.VIP, opts.Hostname, int(opts.Timeout.Seconds()))
+	args := buildSSHArgs(user, targetHost, keyPath, opts.UseBastionTunnel, opts.ResourceID, opts.EffectiveLocation(), remoteCmd)
+	cmd := exec.CommandContext(ctx, "ssh", args...) // #nosec G204 -- ssh arguments built from validated parameters
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return 0, 0, fmt.Errorf("ssh-curl: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
-	// stdout format: "<code> <seconds>"
 	out := strings.TrimSpace(stdout.String())
 	parts := strings.Fields(out)
 	if len(parts) < 2 {
@@ -243,14 +376,7 @@ type BodyProbeResult struct {
 	Err       string `json:"error,omitempty"`
 }
 
-// buildCurlBodyCmd returns the remote curl command that captures the response
-// body. Unlike buildCurlCmd it does NOT use -o /dev/null; it writes the body
-// to stdout and appends the HTTP code on a final newline-separated line:
-//
-//	<body>\n<code>
-//
-// When host is non-empty, -H 'Host: <host>' is added so requests match
-// hostname-scoped HTTPRoutes.
+// buildCurlBodyCmd returns the remote curl command that captures the response body.
 func buildCurlBodyCmd(sourceIP, vip, host string, timeoutSecs int) string {
 	hostHdr := ""
 	if host != "" {
@@ -260,34 +386,29 @@ func buildCurlBodyCmd(sourceIP, vip, host string, timeoutSecs int) string {
 		hostHdr, sourceIP, timeoutSecs, vip)
 }
 
-// SSHCurlBodyViaEICE opens an EICE tunnel to the jumphost and runs a single
-// body-capturing curl. It returns the response body (trimmed), the HTTP code,
-// and any error. The caller is responsible for minting + pushing the key before
-// calling this (use prepareEICEKey).
+// SSHCurlBodyViaEICE opens an SSH connection to the jumphost and runs a single body-capturing curl.
 func SSHCurlBodyViaEICE(ctx context.Context, region, instanceID, keyPath, sourceIP, vip, host string, timeout time.Duration) (body string, code int, err error) {
-	proxy := fmt.Sprintf(`ProxyCommand=aws ec2-instance-connect open-tunnel --instance-id %s --region %s`, instanceID, region)
-	remoteCmd := buildCurlBodyCmd(sourceIP, vip, host, int(timeout.Seconds()))
-	args := []string{
-		"-o", proxy,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "ConnectTimeout=15",
-		"-i", keyPath,
-		"ec2-user@" + instanceID,
-		remoteCmd,
+	opts := ProbeOptions{
+		Region:     region,
+		InstanceID: instanceID,
+		SourceIP:   sourceIP,
+		VIP:        vip,
+		Hostname:   host,
+		Timeout:    timeout,
 	}
-	// #nosec G204 -- args are constructed from validated state.env values
-	// (instanceID, region, sourceIP) + a temp private-key path we just minted +
-	// a VIP from cluster.yaml; no caller-supplied free text reaches the subprocess.
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	return sshCurlBodyProbe(ctx, opts, keyPath, opts.TargetHost(), opts.EffectiveUser())
+}
+
+func sshCurlBodyProbe(ctx context.Context, opts ProbeOptions, keyPath, targetHost, user string) (string, int, error) {
+	remoteCmd := buildCurlBodyCmd(opts.SourceIP, opts.VIP, opts.Hostname, int(opts.Timeout.Seconds()))
+	args := buildSSHArgs(user, targetHost, keyPath, opts.UseBastionTunnel, opts.ResourceID, opts.EffectiveLocation(), remoteCmd)
+	cmd := exec.CommandContext(ctx, "ssh", args...) // #nosec G204 -- ssh arguments built from validated parameters
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return "", 0, fmt.Errorf("ssh-curl-body: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
-	// stdout format: "<body>\n<code>"
-	// Split on the LAST newline — body may itself contain newlines.
 	raw := stdout.String()
 	lastNL := strings.LastIndex(raw, "\n")
 	if lastNL < 0 {
@@ -302,10 +423,8 @@ func SSHCurlBodyViaEICE(ctx context.Context, region, instanceID, keyPath, source
 	return bodyStr, httpCode, nil
 }
 
-// RunCurlBodyProbes mints an ephemeral SSH key, pushes it via EC2 Instance
-// Connect, then runs opts.Iterations body-capturing curls from the jumphost.
-// The Host header is set from opts.Hostname (empty = no header).
-// Returns per-iteration results including the response body.
+// RunCurlBodyProbes mints an ephemeral SSH key (or uses opts.SSHKeyPath), pushes it,
+// then runs opts.Iterations body-capturing curls from the jumphost.
 func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResult, error) {
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
@@ -313,11 +432,12 @@ func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResul
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
 	}
-	if opts.User == "" {
-		opts.User = "ec2-user"
-	}
+	user := opts.EffectiveUser()
+	loc := opts.EffectiveLocation()
+	vm := opts.EffectiveVMName()
+	targetHost := opts.TargetHost()
 
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKey(ctx, opts.Region, opts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -325,9 +445,10 @@ func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResul
 
 	results := make([]BodyProbeResult, 0, opts.Iterations)
 	for i := 1; i <= opts.Iterations; i++ {
-		// Re-push the public key before each iteration to reset the ~60s TTL.
-		_ = PushSSHPublicKey(ctx, opts.Region, opts.InstanceID, pubKeyPath)
-		body, code, perr := SSHCurlBodyViaEICE(ctx, opts.Region, opts.InstanceID, keyPath, opts.SourceIP, opts.VIP, opts.Hostname, opts.Timeout)
+		if pubKeyPath != "" {
+			_ = pushSSHPublicKeyFn(ctx, loc, vm, pubKeyPath)
+		}
+		body, code, perr := sshCurlBodyProbe(ctx, opts, keyPath, targetHost, user)
 		res := BodyProbeResult{Iteration: i, HTTPCode: code, Body: body}
 		if perr != nil {
 			res.Err = perr.Error()
@@ -337,37 +458,23 @@ func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResul
 	return results, nil
 }
 
-// SSHRunViaEICE opens an EICE tunnel to the jumphost and runs an arbitrary
-// remote command, returning its stdout (trimmed). It uses the same ssh
-// ProxyCommand args as SSHCurlBodyViaEICE and the ec2-user account. The caller
-// is responsible for minting + pushing the key before calling this (use
-// prepareEICEKey).
+// SSHRunViaEICE opens an SSH connection to the jumphost and runs an arbitrary
+// remote command, returning its stdout (trimmed).
 func SSHRunViaEICE(ctx context.Context, region, instanceID, keyPath, remoteCmd string) (string, error) {
 	return SSHRunViaEICEWithStdin(ctx, region, instanceID, keyPath, remoteCmd, nil)
 }
 
 // SSHRunViaEICEWithStdin is SSHRunViaEICE with the local ssh process's stdin
-// attached to the given reader (nil = no stdin, identical to SSHRunViaEICE).
-// stdin propagates through ssh → sshd → the remote command (and onward through
-// any nested ssh the remote command runs), so callers can deliver secrets to a
-// remote `cat > file` without the secret ever appearing on a command line
-// (argv) — neither in the operator host's process list nor the jumphost's.
+// attached to the given reader.
 func SSHRunViaEICEWithStdin(ctx context.Context, region, instanceID, keyPath, remoteCmd string, stdin io.Reader) (string, error) {
-	proxy := fmt.Sprintf(`ProxyCommand=aws ec2-instance-connect open-tunnel --instance-id %s --region %s`, instanceID, region)
-	args := []string{
-		"-o", proxy,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "ConnectTimeout=15",
-		"-i", keyPath,
-		"ec2-user@" + instanceID,
-		remoteCmd,
+	opts := ProbeOptions{
+		Region:     region,
+		InstanceID: instanceID,
 	}
-	// #nosec G204 -- args are constructed from validated state.env values
-	// (instanceID, region) + a temp private-key path we just minted + a
-	// remoteCmd built from package-controlled values (port + shell-escaped
-	// marker); no caller-supplied free text reaches the subprocess.
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	user := opts.EffectiveUser()
+	targetHost := opts.TargetHost()
+	args := buildSSHArgs(user, targetHost, keyPath, opts.UseBastionTunnel, opts.ResourceID, opts.EffectiveLocation(), remoteCmd)
+	cmd := exec.CommandContext(ctx, "ssh", args...) // #nosec G204 -- ssh arguments built from validated parameters
 	cmd.Stdin = stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -378,21 +485,13 @@ func SSHRunViaEICEWithStdin(ctx context.Context, region, instanceID, keyPath, re
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// shellSingleQuote wraps s in single quotes safe for /bin/sh, escaping any
-// embedded single quotes via the close-quote/escaped-quote/reopen-quote idiom.
+// shellSingleQuote wraps s in single quotes safe for /bin/sh.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // buildHTTPResponderCmd returns the remote shell command that writes marker to
-// /tmp/azrbnkctl-extpool/index.html and (re)starts a systemd transient unit
-// (`sudo systemd-run`) serving it via `python3 -m http.server <port>`, then
-// curls 127.0.0.1:<port> and echoes the HTTP code.
-// A "200" trailing line means the responder is live. The marker is
-// shell-escaped so arbitrary content is safe.
-// Using systemd-run instead of setsid/nohup ensures the process persists
-// across EC2 Instance Connect (EICE) sessions and starts cleanly over the
-// EICE tunnel (which returns ssh exit 255 for backgrounded shell jobs).
+// /tmp/azrbnkctl-extpool/index.html and (re)starts a systemd transient unit.
 func buildHTTPResponderCmd(port int, marker string) string {
 	q := shellSingleQuote(marker)
 	unit := fmt.Sprintf("azrbnkctl-extpool-%d", port)
@@ -402,25 +501,21 @@ func buildHTTPResponderCmd(port int, marker string) string {
 	)
 }
 
-// buildHTTPResponderStopCmd returns the best-effort remote command that stops
-// the systemd transient unit for the given port.
+// buildHTTPResponderStopCmd returns the remote command that stops the systemd transient unit.
 func buildHTTPResponderStopCmd(port int) string {
 	unit := fmt.Sprintf("azrbnkctl-extpool-%d", port)
 	return fmt.Sprintf(`sudo systemctl stop %s 2>/dev/null; sudo systemctl reset-failed %s 2>/dev/null; true`, unit, unit)
 }
 
-// StartHTTPResponder mints+pushes an ephemeral key, then starts a backgrounded
-// python3 HTTP server on the jumphost that serves marker as the body on port.
-// It returns nil only when the in-host self-curl returns HTTP 200; otherwise it
-// returns an error including the remote stdout so failures are diagnosable.
+// StartHTTPResponder starts a backgrounded python3 HTTP server on the jumphost.
 func StartHTTPResponder(ctx context.Context, opts ProbeOptions, port int, marker string) error {
-	keyPath, _, cleanup, err := prepareEICEKey(ctx, opts.Region, opts.InstanceID)
+	keyPath, _, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	out, runErr := SSHRunViaEICE(ctx, opts.Region, opts.InstanceID, keyPath, buildHTTPResponderCmd(port, marker))
+	out, runErr := sshRunViaEICEFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, buildHTTPResponderCmd(port, marker))
 	if runErr != nil {
 		return fmt.Errorf("starting HTTP responder on :%d: %w (remote stdout: %q)", port, runErr, out)
 	}
@@ -430,18 +525,15 @@ func StartHTTPResponder(ctx context.Context, opts ProbeOptions, port int, marker
 	return nil
 }
 
-// StopHTTPResponder best-effort kills any python3 http.server on port via the
-// EICE tunnel. A non-zero remote exit (e.g. nothing to kill) is not an error.
+// StopHTTPResponder kills any python3 http.server on port on the jumphost.
 func StopHTTPResponder(ctx context.Context, opts ProbeOptions, port int) error {
-	keyPath, _, cleanup, err := prepareEICEKey(ctx, opts.Region, opts.InstanceID)
+	keyPath, _, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	// Ignore the run error: pkill returns non-zero when no process matched,
-	// which is a perfectly fine outcome for a best-effort stop.
-	_, _ = SSHRunViaEICE(ctx, opts.Region, opts.InstanceID, keyPath, buildHTTPResponderStopCmd(port))
+	_, _ = sshRunViaEICEFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, buildHTTPResponderStopCmd(port))
 	return nil
 }
 

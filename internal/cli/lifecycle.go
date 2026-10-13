@@ -21,6 +21,7 @@ var (
 	flagUpDryRun   bool
 	flagDownDryRun bool
 	flagYes        bool
+	flagKeepRG     bool
 )
 
 var upCmd = &cobra.Command{
@@ -42,7 +43,7 @@ var downCmd = &cobra.Command{
 	Long: `azrbnkctl down deletes the AKS cluster, NAT Gateway, Public IPs,
 VNet, Subnets, NSG, and Resource Group in reverse dependency order.
 
-  azrbnkctl down -f cluster.yaml [--yes] [--dry-run]`,
+  azrbnkctl down -f cluster.yaml [--yes] [--keep-rg] [--dry-run]`,
 	RunE: runDown,
 }
 
@@ -53,6 +54,7 @@ func init() {
 	downCmd.Flags().StringVarP(&flagConfig, "config", "f", "", "path to cluster.yaml (required)")
 	downCmd.Flags().BoolVar(&flagDownDryRun, "dry-run", false, "print the destroy plan and exit 0 with no Azure mutations")
 	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation")
+	downCmd.Flags().BoolVar(&flagKeepRG, "keep-rg", false, "keep the Azure Resource Group and only delete managed resources inside it")
 
 	rootCmd.AddCommand(upCmd, downCmd)
 }
@@ -68,7 +70,7 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	if flagConfig == "" {
 		return errors.New("azrbnkctl down requires -f <cluster.yaml>")
 	}
-	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagDownDryRun)
+	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagKeepRG, flagDownDryRun)
 }
 
 type upPhase struct {
@@ -144,13 +146,20 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 }
 
 func buildAzureClients(ctx context.Context, cl *intent.Cluster, dryRun bool) (*azure.Clients, error) {
+	subID, err := azure.ResolveSubscriptionID(cl.Metadata.SubscriptionID)
+	if err != nil {
+		if dryRun && azure.ShouldSkipAuth() {
+			return &azure.Clients{SubscriptionID: "00000000-0000-0000-0000-000000000000"}, nil
+		}
+		return nil, fmt.Errorf("resolving subscription ID: %w", err)
+	}
 	if azure.ShouldSkipAuth() {
 		if !dryRun {
 			return nil, errors.New("AZRBNKCTL_SKIP_AUTH=1 is only valid together with --dry-run")
 		}
-		return &azure.Clients{SubscriptionID: cl.Metadata.SubscriptionID}, nil
+		return &azure.Clients{SubscriptionID: subID}, nil
 	}
-	return azure.NewClientsWithDefault(cl.Metadata.SubscriptionID)
+	return azure.NewClientsWithDefault(subID)
 }
 
 func confirmDestroy(in io.Reader, out io.Writer, name, rg, subID string) bool {
@@ -164,7 +173,7 @@ func confirmDestroy(in io.Reader, out io.Writer, name, rg, subID string) bool {
 	return true
 }
 
-func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) error {
+func runPhasedDown(ctx context.Context, configPath string, yes, keepRG, dryRun bool) error {
 	cl, err := intent.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("down: %w", err)
@@ -176,7 +185,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	}
 
 	if dryRun {
-		printDownPlan(os.Stderr, cl)
+		printDownPlan(os.Stderr, cl, keepRG)
 		return nil
 	}
 
@@ -201,7 +210,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	if err := phases.PhaseDownNetworks(ctx, cl, st, clients, dryRun); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
-	if err := phases.PhaseDownResourceGroup(ctx, cl, st, clients, false, dryRun); err != nil {
+	if err := phases.PhaseDownResourceGroup(ctx, cl, st, clients, keepRG, dryRun); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
 
@@ -212,7 +221,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, dryRun bool) err
 	return nil
 }
 
-func printDownPlan(w io.Writer, cl *intent.Cluster) {
+func printDownPlan(w io.Writer, cl *intent.Cluster, keepRG bool) {
 	fmt.Fprintf(w, "→ dry-run: destroy plan for cluster %q (rg=%s subscription=%s) — no Azure mutations\n",
 		cl.Metadata.Name, cl.Derived.ResourceGroupName, cl.Metadata.SubscriptionID)
 
@@ -226,7 +235,11 @@ func printDownPlan(w io.Writer, cl *intent.Cluster) {
 	plan = append(plan, fmt.Sprintf("  • delete  Ingress Public IP          %s", cl.Derived.PublicIPName))
 	plan = append(plan, fmt.Sprintf("  • delete  VNet & Subnets             %s", cl.Derived.VNetName))
 	plan = append(plan, fmt.Sprintf("  • delete  NSG                        %s", cl.Derived.NSGName))
-	plan = append(plan, fmt.Sprintf("  • delete  Resource Group             %s", cl.Derived.ResourceGroupName))
+	if !keepRG {
+		plan = append(plan, fmt.Sprintf("  • delete  Resource Group             %s", cl.Derived.ResourceGroupName))
+	} else {
+		plan = append(plan, fmt.Sprintf("  • keep    Resource Group             %s (--keep-rg)", cl.Derived.ResourceGroupName))
+	}
 
 	for _, line := range plan {
 		fmt.Fprintln(w, line)

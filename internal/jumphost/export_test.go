@@ -16,6 +16,12 @@ var BuildHTTPResponderStopCmd = buildHTTPResponderStopCmd
 // Uses the same var pattern as the other test exports for consistency.
 var BuildGrpcurlInstallCmd = GrpcurlInstallCmd
 
+// BuildSSHArgs exposes buildSSHArgs for unit tests.
+var BuildSSHArgs = buildSSHArgs
+
+// PrepareProbeKey exposes prepareProbeKey for unit tests.
+var PrepareProbeKey = prepareProbeKey
+
 // Seam overrides — tests swap these to avoid real ssh/aws subprocess calls.
 
 // PrepareEICEKeyFn is the overridable seam for prepareEICEKey consumed by

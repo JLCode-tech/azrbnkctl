@@ -607,7 +607,7 @@ func RunAiperf(ctx context.Context, opts AiperfRunOptions) (*AiperfResult, error
 		opts.Config.Timeout = 5 * time.Minute
 	}
 	if opts.ProbeOptions.User == "" {
-		opts.ProbeOptions.User = "ec2-user"
+		opts.ProbeOptions.User = DefaultSSHUser
 	}
 
 	// Validate trace URL scheme before doing any network operations.
@@ -617,7 +617,7 @@ func RunAiperf(ctx context.Context, opts AiperfRunOptions) (*AiperfResult, error
 		}
 	}
 
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKeyFn(ctx, opts.ProbeOptions.Region, opts.ProbeOptions.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts.ProbeOptions)
 	if err != nil {
 		return nil, fmt.Errorf("aiperf: prepare EICE key: %w", err)
 	}
@@ -625,7 +625,9 @@ func RunAiperf(ctx context.Context, opts AiperfRunOptions) (*AiperfResult, error
 
 	// Re-push public key to reset the ~60 s EICE TTL before the
 	// long-running aiperf session starts.
-	_ = pushSSHPublicKeyFn(ctx, opts.ProbeOptions.Region, opts.ProbeOptions.InstanceID, pubKeyPath)
+	if pubKeyPath != "" {
+		_ = pushSSHPublicKeyFn(ctx, opts.ProbeOptions.EffectiveLocation(), opts.ProbeOptions.EffectiveVMName(), pubKeyPath)
+	}
 
 	remoteCmd := buildAiperfCmd(opts)
 
@@ -633,7 +635,7 @@ func RunAiperf(ctx context.Context, opts AiperfRunOptions) (*AiperfResult, error
 	runCtx, cancel := context.WithTimeout(ctx, opts.Config.Timeout)
 	defer cancel()
 
-	stdout, err := aiperfSSHExecFn(runCtx, opts.ProbeOptions.Region, opts.ProbeOptions.InstanceID, keyPath, remoteCmd)
+	stdout, err := aiperfSSHExecFn(runCtx, opts.ProbeOptions.EffectiveLocation(), opts.ProbeOptions.EffectiveVMName(), keyPath, remoteCmd)
 	if err != nil {
 		return nil, fmt.Errorf("aiperf: remote exec: %w", err)
 	}
@@ -678,22 +680,24 @@ func RunAiperf(ctx context.Context, opts AiperfRunOptions) (*AiperfResult, error
 // Note: on AL2023, `dnf install python3.11` does NOT include pip — we also
 // install python3.11-pip explicitly, and fall back to `ensurepip --user`
 // in case the package name differs across AL2023 minor versions.
-// The console script lands at ~/.local/bin/aiperf which is on the ec2-user PATH.
+// The console script lands at ~/.local/bin/aiperf which is on the user's PATH.
 //
 // Guard: runs `aiperf --version` first; only installs if the version is
 // missing or is the 0.1.0 placeholder (the spurious PyPI package).
 func EnsureAiperf(ctx context.Context, probOpts ProbeOptions) error {
 	if probOpts.User == "" {
-		probOpts.User = "ec2-user"
+		probOpts.User = DefaultSSHUser
 	}
 
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKeyFn(ctx, probOpts.Region, probOpts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, probOpts)
 	if err != nil {
 		return fmt.Errorf("ensure aiperf: prepare EICE key: %w", err)
 	}
 	defer cleanup()
 
-	_ = pushSSHPublicKeyFn(ctx, probOpts.Region, probOpts.InstanceID, pubKeyPath)
+	if pubKeyPath != "" {
+		_ = pushSSHPublicKeyFn(ctx, probOpts.EffectiveLocation(), probOpts.EffectiveVMName(), pubKeyPath)
+	}
 
 	// Guarded install sequence:
 	// 1. Run `aiperf --version`; if it prints 0.13.x (the version Forge's own
@@ -724,7 +728,7 @@ else
   fi
 fi`
 
-	out, err := aiperfSSHExecFn(ctx, probOpts.Region, probOpts.InstanceID, keyPath, checkCmd)
+	out, err := aiperfSSHExecFn(ctx, probOpts.EffectiveLocation(), probOpts.EffectiveVMName(), keyPath, checkCmd)
 	if err != nil {
 		return fmt.Errorf("ensure aiperf: install failed: %w (output: %s)", err, strings.TrimSpace(out))
 	}
