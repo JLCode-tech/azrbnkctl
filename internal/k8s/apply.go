@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -41,7 +42,7 @@ type ApplyOptions struct {
 	Force          bool
 	KubeconfigPath string
 
-	IOStreams IOStreams
+	IOStreams genericiooptions.IOStreams
 }
 
 // Run resolves Filename to a slice of unstructured objects and SSA-
@@ -173,22 +174,7 @@ func parseYAMLStream(r io.Reader) ([]*unstructured.Unstructured, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []*unstructured.Unstructured
-	for _, doc := range splitYAML(data) {
-		doc = bytes.TrimSpace(doc)
-		if len(doc) == 0 {
-			continue
-		}
-		u := &unstructured.Unstructured{}
-		if err := yaml.Unmarshal(doc, &u.Object); err != nil {
-			return nil, fmt.Errorf("parsing yaml: %w", err)
-		}
-		if len(u.Object) == 0 {
-			continue
-		}
-		out = append(out, u)
-	}
-	return out, nil
+	return ParseYAMLStream(data)
 }
 
 // splitYAML splits a YAML stream on the document separator. Conservative:

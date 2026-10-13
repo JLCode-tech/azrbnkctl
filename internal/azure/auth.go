@@ -34,7 +34,7 @@ func NewCredential() (azcore.TokenCredential, error) {
 // ResolveSubscriptionID resolves the Azure Subscription ID from the intent file,
 // environment variables (AZURE_SUBSCRIPTION_ID, ARM_SUBSCRIPTION_ID), or returns an error.
 func ResolveSubscriptionID(explicit string) (string, error) {
-	if explicit != "" {
+	if explicit != "" && explicit != "00000000-0000-0000-0000-000000000000" {
 		return explicit, nil
 	}
 	if env := os.Getenv("AZURE_SUBSCRIPTION_ID"); env != "" {

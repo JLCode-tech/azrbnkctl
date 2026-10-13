@@ -61,7 +61,7 @@ func Run(ctx context.Context, cfg Config) []Check {
 	var results []Check
 
 	// 1. Tooling checks
-	results = append(results, checkBinary(ctx, "az", false, "Azure CLI for authentication and SDK helpers"))
+	results = append(results, checkBinary(ctx, "az", true, "Azure CLI (optional; azrbnkctl uses Azure Go SDK with DefaultAzureCredential)"))
 	results = append(results, checkBinary(ctx, "kubectl", true, "Kubernetes CLI (optional; azrbnkctl has client-go in-process)"))
 
 	// 2. Azure Authentication
@@ -98,10 +98,16 @@ func checkBinary(ctx context.Context, name string, optional bool, why string) Ch
 		status := StatusError
 		if optional {
 			status = StatusOK
+			detail := "not on PATH (optional)"
+			if name == "kubectl" {
+				detail = "not on PATH (optional; client-go internalized)"
+			} else if name == "az" {
+				detail = "not on PATH (optional; Azure SDK internalized)"
+			}
 			return Check{
 				Name:     name,
 				Status:   status,
-				Detail:   "not on PATH (optional; client-go internalized)",
+				Detail:   detail,
 				Why:      why,
 				Optional: optional,
 			}

@@ -1,57 +1,93 @@
 package k8s
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-// ExecCapture executes a command in a pod container and buffers stdout/stderr.
-func ExecCapture(ctx context.Context, cfg *rest.Config, clientset kubernetes.Interface, ns, pod, container string, command []string) (stdout, stderr string, err error) {
-	if cfg == nil {
-		return "", "", fmt.Errorf("k8s: ExecCapture: rest.Config is nil")
+// ExecOptions captures the flag-parsed inputs to `azrbnkctl k exec`.
+type ExecOptions struct {
+	PodName        string
+	Namespace      string
+	Container      string
+	Stdin          bool
+	TTY            bool
+	Command        []string
+	KubeconfigPath string
+
+	IOStreams genericiooptions.IOStreams
+
+	// SizeQueue is consulted when TTY is true so the remote PTY tracks
+	// terminal resizes. Optional; nil disables resize forwarding.
+	SizeQueue remotecommand.TerminalSizeQueue
+}
+
+// Run opens an SPDY exec stream against the pod and proxies stdio.
+func (o *ExecOptions) Run(ctx context.Context) error {
+	if o.PodName == "" {
+		return errors.New("pod name required")
 	}
-	if clientset == nil {
-		return "", "", fmt.Errorf("k8s: ExecCapture: clientset is nil")
+	if len(o.Command) == 0 {
+		return errors.New("command required after `--`")
 	}
-	if pod == "" {
-		return "", "", fmt.Errorf("k8s: ExecCapture: pod name required")
+	cfg, err := BuildRESTConfig(o.KubeconfigPath)
+	if err != nil {
+		return err
 	}
-	if len(command) == 0 {
-		return "", "", fmt.Errorf("k8s: ExecCapture: command required")
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	ns := o.Namespace
+	if ns == "" {
+		ns = "default"
 	}
 
-	req := clientset.CoreV1().RESTClient().
+	req := cs.CoreV1().RESTClient().
 		Post().
 		Resource("pods").
-		Name(pod).
+		Name(o.PodName).
 		Namespace(ns).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Container: container,
-			Command:   command,
+			Container: o.Container,
+			Command:   o.Command,
+			Stdin:     o.Stdin,
 			Stdout:    true,
-			Stderr:    true,
+			Stderr:    !o.TTY,
+			TTY:       o.TTY,
 		}, scheme.ParameterCodec)
 
-	executor, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
+	exec, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
 	if err != nil {
-		return "", "", fmt.Errorf("k8s: ExecCapture: SPDY executor for %s/%s: %w", ns, pod, err)
+		return fmt.Errorf("setting up SPDY executor: %w", err)
 	}
 
-	var outBuf, errBuf bytes.Buffer
-	streamErr := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &outBuf,
-		Stderr: &errBuf,
-	})
-	if streamErr != nil {
-		return outBuf.String(), errBuf.String(), fmt.Errorf("k8s: ExecCapture: exec %v in %s/%s: %w", command, ns, pod, streamErr)
+	streamOpts := remotecommand.StreamOptions{
+		Stdout: o.IOStreams.Out,
+		Stderr: o.IOStreams.ErrOut,
+		Tty:    o.TTY,
 	}
-	return outBuf.String(), errBuf.String(), nil
+	if o.Stdin {
+		streamOpts.Stdin = o.IOStreams.In
+	}
+	if o.TTY && o.SizeQueue != nil {
+		streamOpts.TerminalSizeQueue = o.SizeQueue
+	}
+	if streamOpts.Stdout == nil {
+		streamOpts.Stdout = io.Discard
+	}
+	if streamOpts.Stderr == nil {
+		streamOpts.Stderr = io.Discard
+	}
+
+	return exec.StreamWithContext(ctx, streamOpts)
 }

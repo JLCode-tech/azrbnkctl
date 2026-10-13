@@ -35,7 +35,7 @@ var (
 // RunStagingCommands is a pure leaf — it imports no cli/scenarios/intent/demo/state
 // packages. All embedding and state reads happen in the calling phase.
 func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []string) ([]string, error) {
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKeyFn(ctx, opts.Region, opts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -46,9 +46,11 @@ func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []strin
 		// Re-push before every command to reset the ~60s EICE TTL.
 		// Mirror RunCurlProbes ~145: errors are intentionally ignored (best-effort
 		// TTL extension; the subsequent SSH call surfaces the real failure).
-		_ = pushSSHPublicKeyFn(ctx, opts.Region, opts.InstanceID, pubKeyPath)
+		if pubKeyPath != "" {
+			_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
+		}
 
-		stdout, runErr := sshRunViaEICEFn(ctx, opts.Region, opts.InstanceID, keyPath, cmd)
+		stdout, runErr := sshRunViaEICEFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, cmd)
 		out = append(out, stdout)
 		if runErr != nil {
 			// Fail-fast: return stdout-so-far + error so the phase can log the
@@ -70,7 +72,7 @@ func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []strin
 // Like RunStagingCommands, it is a pure leaf — no cli/scenarios/intent/demo/
 // state imports.
 func RunStagingCommandWithStdin(ctx context.Context, opts ProbeOptions, command string, stdin io.Reader) (string, error) {
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKeyFn(ctx, opts.Region, opts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return "", err
 	}
@@ -78,9 +80,11 @@ func RunStagingCommandWithStdin(ctx context.Context, opts ProbeOptions, command 
 
 	// Re-push before the command to reset the ~60s EICE TTL (best-effort, same
 	// rationale as RunStagingCommands).
-	_ = pushSSHPublicKeyFn(ctx, opts.Region, opts.InstanceID, pubKeyPath)
+	if pubKeyPath != "" {
+		_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
+	}
 
-	return sshRunViaEICEStdinFn(ctx, opts.Region, opts.InstanceID, keyPath, command, stdin)
+	return sshRunViaEICEStdinFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, command, stdin)
 }
 
 // CopyFileViaEICE mints+pushes an ephemeral key, then writes content to remotePath
@@ -96,14 +100,16 @@ func RunStagingCommandWithStdin(ctx context.Context, opts ProbeOptions, command 
 // content is visible in `ps` on the operator host (and is capped by ARG_MAX).
 // Never use this for secrets (keys, passwords) — use CopyFileViaEICEStdin.
 func CopyFileViaEICE(ctx context.Context, opts ProbeOptions, content []byte, remotePath string) error {
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKeyFn(ctx, opts.Region, opts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
 	// Re-push before the write to reset the EICE TTL.
-	_ = pushSSHPublicKeyFn(ctx, opts.Region, opts.InstanceID, pubKeyPath)
+	if pubKeyPath != "" {
+		_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
+	}
 
 	b64 := base64.StdEncoding.EncodeToString(content)
 	dir := filepath.Dir(remotePath)
@@ -117,7 +123,7 @@ func CopyFileViaEICE(ctx context.Context, opts ProbeOptions, content []byte, rem
 		shellSingleQuote(remotePath),
 	)
 
-	_, runErr := sshRunViaEICEFn(ctx, opts.Region, opts.InstanceID, keyPath, remoteCmd)
+	_, runErr := sshRunViaEICEFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, remoteCmd)
 	if runErr != nil {
 		return fmt.Errorf("copy %s: %w", remotePath, runErr)
 	}
@@ -132,14 +138,16 @@ func CopyFileViaEICE(ctx context.Context, opts ProbeOptions, content []byte, rem
 // and not bounded by ARG_MAX. Overwrites remotePath unconditionally (same
 // idempotent-overwrite contract as CopyFileViaEICE).
 func CopyFileViaEICEStdin(ctx context.Context, opts ProbeOptions, content []byte, remotePath string) error {
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKeyFn(ctx, opts.Region, opts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
 	// Re-push before the write to reset the EICE TTL.
-	_ = pushSSHPublicKeyFn(ctx, opts.Region, opts.InstanceID, pubKeyPath)
+	if pubKeyPath != "" {
+		_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
+	}
 
 	dir := filepath.Dir(remotePath)
 	remoteCmd := fmt.Sprintf(
@@ -148,7 +156,7 @@ func CopyFileViaEICEStdin(ctx context.Context, opts ProbeOptions, content []byte
 		shellSingleQuote(remotePath),
 	)
 
-	_, runErr := sshRunViaEICEStdinFn(ctx, opts.Region, opts.InstanceID, keyPath, remoteCmd, bytes.NewReader(content))
+	_, runErr := sshRunViaEICEStdinFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, remoteCmd, bytes.NewReader(content))
 	if runErr != nil {
 		return fmt.Errorf("copy %s: %w", remotePath, runErr)
 	}
