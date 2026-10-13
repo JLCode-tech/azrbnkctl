@@ -1,0 +1,14 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: curl-test
+  namespace: lz-eastus2-demo
+spec:
+  template:
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:latest
+        command: ["curl", "-v", "--http2-prior-knowledge", "http://10.0.17.100/"]
+      restartPolicy: Never
+  backoffLimit: 2

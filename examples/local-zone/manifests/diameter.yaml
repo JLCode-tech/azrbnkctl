@@ -1,0 +1,95 @@
+# Diameter (TCP 3868) reference for Azure Local / Edge Zones:
+# GatewaySettings, backend, Gateway with static VIP at 10.0.17.122, L4Route.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: diameter-scenario
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: diameter-scenario
+  namespace: diameter-scenario
+spec:
+  ingressConfig:
+    defaultListenerNetwork:
+      ipamRefs:
+      - name: listener-pool
+      networkRefs:
+      - name: ext-vlan-infra
+      sourceNATConfig:
+        type: Automap
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diameter-backend
+  namespace: diameter-scenario
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: diameter
+  template:
+    metadata:
+      labels:
+        app: diameter
+    spec:
+      containers:
+      - name: diameter
+        image: nicolaka/netshoot
+        command: ["socat", "TCP-LISTEN:3868,fork", "EXEC:'echo Diameter OK'"]
+        ports:
+        - containerPort: 3868
+          protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: diameter-backend
+  namespace: diameter-scenario
+spec:
+  selector:
+    app: diameter
+  ports:
+  - port: 3868
+    targetPort: 3868
+    protocol: TCP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: diameter-gateway
+  namespace: diameter-scenario
+spec:
+  gatewayClassName: poc-dual-interface-gatewayclass
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: diameter-scenario
+  addresses:
+  - type: IPAddress
+    value: 10.0.17.122
+  listeners:
+  - name: diameter-listen
+    protocol: TCP
+    port: 3868
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.k8s.f5.com/v1
+kind: L4Route
+metadata:
+  name: diameter-route
+  namespace: diameter-scenario
+spec:
+  protocol: TCP
+  parentRefs:
+  - name: diameter-gateway
+    sectionName: diameter-listen
+  rules:
+  - backendRefs:
+    - name: diameter-backend
+      port: 3868

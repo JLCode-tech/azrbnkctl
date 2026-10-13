@@ -41,6 +41,14 @@ func runK(cmd *cobra.Command, args []string) error {
 	}
 
 	kcPath := filepath.Join("artifacts", "kubeconfig")
+	if fileExists("cluster.yaml") {
+		if cl, err := intent.Load("cluster.yaml"); err == nil {
+			clusterKC := filepath.Join(".azrbnkctl", cl.Metadata.Name, "kubeconfig")
+			if fileExists(clusterKC) {
+				kcPath = clusterKC
+			}
+		}
+	}
 	if _, err := os.Stat(kcPath); os.IsNotExist(err) {
 		if fileExists("cluster.yaml") {
 			ctx := cmd.Context()

@@ -1,0 +1,39 @@
+# Egress for Azure Local / Edge test namespaces:
+# One GatewaySettings egressConfigs entry (Automap SNAT on int-vlan-infra)
+# and an EgressGateway selecting the edge namespaces.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: local-zone-egress
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: edge-test-egress
+  namespace: local-zone-egress
+spec:
+  egressConfigs:
+  - name: default-egress
+    networkRef:
+      name: int-vlan-infra
+    sourceNATConfig:
+      type: Automap
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: EgressGateway
+metadata:
+  name: edge-test-egress
+  namespace: local-zone-egress
+spec:
+  gatewayClassName: poc-dual-interface-gatewayclass
+  infrastructure:
+    parametersRef:
+      name: edge-test-egress
+      sectionName: default-egress
+  sourceSelector:
+    selectionMode: NamespaceSelector
+    namespaces:
+      matchNames:
+      - http2-scenario
+      - diameter-scenario
+      - sctp-scenario

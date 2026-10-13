@@ -298,7 +298,7 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("bnk upgrade: reading cne-controller rbac template: %w", err)
 	}
-	rbacYAML, err := render.RenderCNEControllerRBAC(rbacTmpl, cl)
+	rbacYAML, err := render.RenderCNEControllerRBACNamespace(rbacTmpl, cl, flagBnkUpgradeNamespace)
 	if err != nil {
 		return fmt.Errorf("bnk upgrade: %w", err)
 	}
@@ -335,10 +335,11 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		// Step 5: the TMM log stream. FLO 2.30 gives the TMM fluentbit sidecar no
 		// stdout output; the f5-toda-fluentd stdout store carries the TMM lines
 		// (governance records included) for `logs tmm` and the collectors.
+		// Best-effort: on Azure or when fluentd is not deployed, skip gracefully.
 		if err == nil && deps.K8s != nil {
 			switch changed, lerr := k8s.EnableTMMLogStream(ctx, deps.K8s, flagBnkUpgradeTimeout); {
 			case lerr != nil:
-				err = fmt.Errorf("TMM log stream: %w", lerr)
+				fmt.Fprintf(os.Stderr, "[upgrade] step 5: TMM log stream skipped (%v)\n", lerr)
 			case changed:
 				res.LogStreamEnabled = true
 				fmt.Fprintf(os.Stderr, "[upgrade] step 5: enabled the stdout store in %s/%s and bounced the fluentd pod (TMM log stream for `azrbnkctl logs tmm`)\n", k8s.TMMLogNamespace, k8s.TMMLogCustomConfigMap)
@@ -411,7 +412,8 @@ func floUpgradeInputs(cl *intent.Cluster) (farKeyB64 string, values map[string]a
 	if err := yaml.Unmarshal(rendered, &values); err != nil {
 		return "", nil, fmt.Errorf("parsing rendered flo-values: %w", err)
 	}
-	return strings.TrimSpace(string(farData)), values, nil
+	farPayload := phases.ExtractFARPayload(farData)
+	return strings.TrimSpace(string(farPayload)), values, nil
 }
 
 // resolveClusterPath joins a relative cluster.yaml path to the file's directory.
@@ -424,8 +426,9 @@ func resolveClusterPath(sourcePath, path string) string {
 
 // bnkUpgradeServiceCIDR resolves the Kubernetes service range step 2 writes
 // into the TMM env (render.TMMK8sRoutesEnv): the --service-cidr flag, else
-// state.env (phase 08 records it for clusters azrbnkctl provisioned), else
-// default 10.0.0.0/16.
+// state.env (phase 08 records it for clusters azrbnkctl provisioned).
+// Note: On Azure AKS, TMM_K8S_ROUTES must NOT default to 10.0.0.0/16 because
+// mapres routes through 169.254.1.1 which fails on Azure with "route: no route to gateway".
 var bnkUpgradeServiceCIDR = func(ctx context.Context, cl *intent.Cluster, flag string) (cidr, note string) {
 	if flag != "" {
 		return flag, ""
@@ -433,5 +436,5 @@ var bnkUpgradeServiceCIDR = func(ctx context.Context, cl *intent.Cluster, flag s
 	if st, err := state.Load(cl.StateDir()); err == nil && st.Get(phases.ServiceCIDRStateKey) != "" {
 		return st.Get(phases.ServiceCIDRStateKey), ""
 	}
-	return "10.0.0.0/16", fmt.Sprintf("service range 10.0.0.0/16 used as default (TMM env %s)", render.TMMK8sRoutesEnv)
+	return "", ""
 }

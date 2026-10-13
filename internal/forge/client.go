@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/forge/mcp"
@@ -176,9 +177,41 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	}
 	_ = json.Unmarshal([]byte(res.Text()), &errCheck)
 	if (errCheck.Ok != nil && !*errCheck.Ok) || (errCheck.Error != nil && out.Project.ID == 0) || out.Project.ID == 0 {
+		if strings.Contains(res.Text(), "already exists") || strings.Contains(res.Text(), "PROJECT_CONFLICT") {
+			if existing, findErr := c.FindProjectByName(ctx, req.Name); findErr == nil {
+				return existing, nil
+			}
+		}
 		return CreateProjectResponse{}, fmt.Errorf("create_project failed: %s", res.Text())
 	}
 	return out, nil
+}
+
+// FindProjectByName queries list_projects MCP tool and matches by name.
+func (c *Client) FindProjectByName(ctx context.Context, name string) (CreateProjectResponse, error) {
+	res, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	if err != nil {
+		return CreateProjectResponse{}, err
+	}
+	var data struct {
+		Projects []struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(res.Text()), &data); err != nil {
+		return CreateProjectResponse{}, err
+	}
+	for _, p := range data.Projects {
+		if p.Name == name {
+			var resp CreateProjectResponse
+			resp.Success = true
+			resp.Project.ID = p.ID
+			resp.Project.Name = p.Name
+			return resp, nil
+		}
+	}
+	return CreateProjectResponse{}, fmt.Errorf("project %q not found", name)
 }
 
 // DeleteProject deletes a project in forge.

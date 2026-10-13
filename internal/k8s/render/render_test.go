@@ -26,8 +26,17 @@ func TestRenderCNEInstance(t *testing.T) {
 	if !strings.Contains(str, "TMM_GENERIC_SOCKET_DRIVER") || !strings.Contains(str, "true") {
 		t.Errorf("expected TMM_GENERIC_SOCKET_DRIVER in output, got:\n%s", str)
 	}
-	if !strings.Contains(str, "TMM_MAPRES_IFC_CLAIM_LIST") || !strings.Contains(str, "net1") {
-		t.Errorf("expected TMM_MAPRES_IFC_CLAIM_LIST in output, got:\n%s", str)
+	if !strings.Contains(str, "hostPath: true") {
+		t.Errorf("expected coremon hostPath in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "PAL_CPU_SET") {
+		t.Errorf("expected PAL_CPU_SET in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "TMM_MAPRES_ADDL_VETHS_ON_DP") || !strings.Contains(str, "TRUE") {
+		t.Errorf("expected TMM_MAPRES_ADDL_VETHS_ON_DP in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "TMM_MAPRES_IFC_CLAIM_LIST") || !strings.Contains(str, "net1,net2") {
+		t.Errorf("expected TMM_MAPRES_IFC_CLAIM_LIST with net1,net2 in output, got:\n%s", str)
 	}
 }
 

@@ -1,0 +1,29 @@
+# local-zone-centralus — Central US Edge Zone Cluster
+
+| Attribute | Specification |
+|---|---|
+| **Cluster Name** | `local-zone-centralus` |
+| **Location** | `centralus` |
+| **Data Plane** | Dual-interface Multi-Networking with Accelerated Networking |
+| **VM Sizes** | 2 × `Standard_D4s_v5` (system), 1 × `Standard_D8s_v5` (TMM) |
+| **Estimated Cost** | ~$3.00 / hour |
+
+This blueprint configures an edge cluster topology for the `centralus` Azure Edge Zone.
+
+---
+
+## Deployment & Verification
+
+```bash
+# Validate intent
+./azrbnkctl validate examples/local-zone-centralus/cluster.yaml
+
+# Provision
+./azrbnkctl up -f examples/local-zone-centralus/cluster.yaml
+
+# Run validation scenarios
+./azrbnkctl scenarios run --all -f examples/local-zone-centralus/cluster.yaml
+
+# Teardown
+./azrbnkctl down -f examples/local-zone-centralus/cluster.yaml
+```

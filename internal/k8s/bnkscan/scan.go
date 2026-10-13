@@ -151,6 +151,18 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 	// Controller rollout.
 	if cs != nil {
 		dep, err := cs.AppsV1().Deployments(opts.ControllerNamespace).Get(ctx, opts.ControllerName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			altNS := "f5-bnk"
+			if opts.ControllerNamespace == "f5-bnk" {
+				altNS = "f5-cne-system"
+			}
+			if depAlt, errAlt := cs.AppsV1().Deployments(altNS).Get(ctx, opts.ControllerName, metav1.GetOptions{}); errAlt == nil {
+				dep = depAlt
+				err = nil
+				idx.Controller.Namespace = altNS
+				idx.TMM.Namespace = altNS
+			}
+		}
 		switch {
 		case err == nil:
 			idx.Controller.Found = true
@@ -373,6 +385,17 @@ func describe(c Condition) string {
 // not an error: FLO has not rendered it yet.
 func scanTMM(ctx context.Context, cs kubernetes.Interface, idx *Index) error {
 	ds, err := cs.AppsV1().DaemonSets(idx.TMM.Namespace).Get(ctx, idx.TMM.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		altNS := "f5-bnk"
+		if idx.TMM.Namespace == "f5-bnk" {
+			altNS = "f5-cne-system"
+		}
+		if dsAlt, errAlt := cs.AppsV1().DaemonSets(altNS).Get(ctx, idx.TMM.Name, metav1.GetOptions{}); errAlt == nil {
+			ds = dsAlt
+			err = nil
+			idx.TMM.Namespace = altNS
+		}
+	}
 	switch {
 	case apierrors.IsNotFound(err):
 		return nil

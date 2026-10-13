@@ -9,6 +9,7 @@ import (
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
 	"github.com/JLCode-tech/azrbnkctl/internal/k8s"
+	"github.com/JLCode-tech/azrbnkctl/internal/k8s/manifests"
 	"github.com/JLCode-tech/azrbnkctl/internal/k8s/render"
 )
 
@@ -19,6 +20,16 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 	extPCI := st.Get("TMM_EXT_PCI")
 	intPCI := st.Get("TMM_INT_PCI")
 
+	palCpuSet := "0,2"
+	if cl.Bnk.TmmCpu == "1" {
+		palCpuSet = "0"
+	}
+
+	tmmK8sRoutes := "10.240.0.0/16"
+	if svcCIDR := st.Get(ServiceCIDRStateKey); svcCIDR != "" {
+		tmmK8sRoutes = svcCIDR
+	}
+
 	data := render.CNEInstanceData{
 		ManifestVersion: cl.Bnk.ManifestVersion,
 		DeploymentSize:  cl.Bnk.DeploymentSize,
@@ -28,6 +39,9 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		ExtPCI:          extPCI,
 		IntPCI:          intPCI,
 		Telemetry:       cl.Bnk.Telemetry,
+		PalCpuSet:       palCpuSet,
+		SkipNics:        "eth0",
+		TmmK8sRoutes:    tmmK8sRoutes,
 	}
 
 	rendered, err := render.RenderCNEInstance(data)
@@ -48,6 +62,13 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 	applier, err := k8s.NewApplier(cfg)
 	if err != nil {
 		return fmt.Errorf("phase34: creating applier: %w", err)
+	}
+
+	// Ensure NetworkAttachmentDefinition CRD is applied
+	if multusBytes, err := manifests.FS.ReadFile("multus/multus-crd.yaml"); err == nil {
+		if multusObjs, err := k8s.ParseYAMLStream(multusBytes); err == nil {
+			_ = applier.ApplyAll(ctx, multusObjs, true)
+		}
 	}
 
 	// Apply NetworkAttachmentDefinitions in f5-bnk and default namespaces
