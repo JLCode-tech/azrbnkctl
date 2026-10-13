@@ -44,7 +44,7 @@ func Phase23Kubeconfig(ctx context.Context, cl *intent.Cluster, st *state.State,
 		return fmt.Errorf("phase23: writing kubeconfig to %s: %w", kubeconfigPath, err)
 	}
 
-	_ = os.MkdirAll("artifacts", 0o755)
+	_ = os.MkdirAll("artifacts", 0o750)
 	_ = os.WriteFile(filepath.Join("artifacts", "kubeconfig"), kubeconfigData, 0o600)
 
 	st.Set("KUBECONFIG_PATH", kubeconfigPath)
