@@ -13,15 +13,19 @@ import (
 
 // CNEInstanceData holds parameters for rendering cneinstance.yaml.tmpl.
 type CNEInstanceData struct {
-	ManifestVersion string
-	DeploymentSize  string
-	TmmCpu          string
-	TmmMemory       string
-	TmmMtu          int
-	ExtPCI          string
-	IntPCI          string
-	Telemetry       bool
-	ImageRegistry   string
+	ManifestVersion    string
+	DeploymentSize     string
+	TmmCpu             string
+	TmmMemory          string
+	TmmMtu             int
+	ExtPCI             string
+	IntPCI             string
+	Telemetry          bool
+	ImageRegistry      string
+	PalCpuSet          string
+	NetworkAttachments []string
+	SkipNics           string
+	TmmK8sRoutes       string
 }
 
 // VlansRoutesData holds parameters for rendering vlans-routes.yaml.tmpl.
@@ -170,16 +174,24 @@ type CNEControllerRBACVars struct {
 	ServiceAccount string // f5-cne-controller
 }
 
-// RenderCNEControllerRBAC renders the EndpointSlice ClusterRole + binding for
+// RenderCNEControllerRBAC renders the EndpointSlice + NAD ClusterRole + binding for
 // the cne-controller ServiceAccount.
 func RenderCNEControllerRBAC(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
+	return RenderCNEControllerRBACNamespace(tmpl, cl, "f5-bnk")
+}
+
+// RenderCNEControllerRBACNamespace renders the RBAC with an explicit namespace.
+func RenderCNEControllerRBACNamespace(tmpl []byte, cl *intent.Cluster, ns string) ([]byte, error) {
 	if cl == nil || cl.Metadata.Name == "" {
 		return nil, fmt.Errorf("render cne-controller rbac: cluster name is required")
+	}
+	if ns == "" {
+		ns = "f5-bnk"
 	}
 	return renderTemplateString(string(tmpl), CNEControllerRBACVars{
 		Name:           CNEControllerRBACName(cl),
 		LabName:        cl.Metadata.Name,
-		InstanceNS:     "f5-cne-system",
+		InstanceNS:     ns,
 		ServiceAccount: CNEControllerServiceAccount,
 	})
 }

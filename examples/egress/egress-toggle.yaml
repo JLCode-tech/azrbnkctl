@@ -1,0 +1,39 @@
+# BNK egress demo — THE TOGGLE.
+#
+#   BNK ON :  kubectl apply -f examples/egress/egress-toggle.yaml
+#   BNK OFF:  kubectl delete -n bnk-egress-demo egressgateway bnk-egress-demo
+#
+#   Watch from the pod:
+#     kubectl exec -it -n bnk-egress-demo deploy/agent -c nginx -- sh /demo/watch.sh
+#
+#   ON  -> the internet sees the Azure NAT Gateway address (traffic left via TMM)
+#   OFF -> the internet sees the node's public IP (traffic left via the node default route)
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: bnk-egress-demo
+  namespace: bnk-egress-demo
+spec:
+  egressConfigs:
+  - name: demo-egress
+    networkRef:
+      name: ext-vlan-infra
+    sourceNATConfig:
+      type: Automap
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: EgressGateway
+metadata:
+  name: bnk-egress-demo
+  namespace: bnk-egress-demo
+spec:
+  gatewayClassName: bnk-egress-gatewayclass
+  infrastructure:
+    parametersRef:
+      name: bnk-egress-demo
+      sectionName: demo-egress
+  sourceSelector:
+    selectionMode: NamespaceSelector
+    namespaces:
+      matchNames:
+      - bnk-egress-demo

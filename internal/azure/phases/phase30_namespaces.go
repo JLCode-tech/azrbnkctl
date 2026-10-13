@@ -117,14 +117,8 @@ func applyCoreDNSCustomConfig(ctx context.Context, applier *k8s.Applier) error {
 	return nil
 }
 
-func extractAndBuildDockerConfig(farPath string) ([]byte, error) {
-	// #nosec G304 -- operator-supplied path to FAR credentials file
-	data, err := os.ReadFile(farPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading FAR file %s: %w", farPath, err)
-	}
-
-	// Check if gzip tar
+// ExtractFARPayload unpacks a .tgz archive if compressed, returning the underlying key content.
+func ExtractFARPayload(data []byte) []byte {
 	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
 		gz, err := gzip.NewReader(bytes.NewReader(data))
 		if err == nil {
@@ -138,13 +132,23 @@ func extractAndBuildDockerConfig(farPath string) ([]byte, error) {
 				if hdr.Typeflag == tar.TypeReg {
 					content, err := io.ReadAll(tr)
 					if err == nil && len(content) > 0 {
-						data = content
-						break
+						return content
 					}
 				}
 			}
 		}
 	}
+	return data
+}
+
+func extractAndBuildDockerConfig(farPath string) ([]byte, error) {
+	// #nosec G304 -- operator-supplied path to FAR credentials file
+	data, err := os.ReadFile(farPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading FAR file %s: %w", farPath, err)
+	}
+
+	data = ExtractFARPayload(data)
 
 	// If already a dockerconfigjson format
 	var testMap map[string]any

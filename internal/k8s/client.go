@@ -43,6 +43,12 @@ func DefaultKubeconfigPath() string {
 			}
 		}
 	}
+	if _, err := os.Stat("artifacts/kubeconfig"); err == nil {
+		return "artifacts/kubeconfig"
+	}
+	if matches, err := filepath.Glob(".azrbnkctl/*/kubeconfig"); err == nil && len(matches) > 0 {
+		return matches[0]
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""

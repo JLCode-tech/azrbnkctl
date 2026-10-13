@@ -1,0 +1,64 @@
+apiVersion: azrbnkctl/v1
+kind: Cluster
+
+metadata:
+  name: bnk-demo-ai
+  subscriptionId: 00000000-0000-0000-0000-000000000000
+  location: eastus2
+  resourceGroup: azrbnkctl-demo-ai-rg
+
+pattern: dual-interface
+
+network:
+  vnetCidr: 10.0.0.0/16
+  subnets:
+    system: 10.0.0.0/20
+    public: 10.0.16.0/28
+    external: 10.0.17.0/24
+    internal: 10.0.18.0/24
+
+cluster:
+  kubernetesVersion: "1.32.0"
+  networkPlugin: azure
+  networkPluginMode: Overlay
+  systemNodePool:
+    name: system
+    vmSize: Standard_D4s_v5
+    count: 2
+  tmmNodePool:
+    name: tmm
+    vmSize: Standard_D8s_v5
+    count: 1
+    acceleratedNetworking: true
+
+bnk:
+  manifestVersion: "2.4.0-3.2882.0"
+  deploymentSize: "small"
+  tmmCpu: "4"
+  tmmMemory: "8Gi"
+  tmmMtu: 1500
+  farArchive: "./keys/f5-far-auth-key.tgz"
+  jwt: "./keys/license.jwt"
+
+# ai: lightweight simulated vLLM inference using llm-d-inference-sim.
+# Provides realistic TTFT, ITL, KV caching, and streaming tokens on standard CPU
+# instances without requiring expensive GPU reservations or model weight downloads.
+ai:
+  synthetic:
+    enabled: true
+    profile: "llama-3.1-8b"
+    replicas: 2
+
+egress:
+  enabled: true
+  namespace: "default"
+  port: 4789
+
+testing:
+  enabled: true
+  targetHost: "f5.com"
+
+tags:
+  Environment: "Demo"
+  Blueprint: "demo-ai"
+  ManagedBy: "azrbnkctl"

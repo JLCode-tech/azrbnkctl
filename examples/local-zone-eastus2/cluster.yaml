@@ -1,0 +1,57 @@
+apiVersion: azrbnkctl/v1
+kind: Cluster
+
+metadata:
+  name: local-zone-eastus2
+  subscriptionId: 00000000-0000-0000-0000-000000000000
+  location: eastus2
+  resourceGroup: azrbnkctl-lz-eastus2-rg
+
+# dual-interface: separates external edge ingress and internal east-west traffic
+pattern: dual-interface
+
+network:
+  vnetCidr: 10.0.0.0/16
+  subnets:
+    system: 10.0.0.0/20
+    public: 10.0.16.0/28
+    external: 10.0.17.0/24
+    internal: 10.0.18.0/24
+
+cluster:
+  kubernetesVersion: "1.32.0"
+  networkPlugin: azure
+  networkPluginMode: Overlay
+  systemNodePool:
+    name: system
+    vmSize: Standard_D4s_v5
+    count: 2
+  tmmNodePool:
+    name: tmm
+    vmSize: Standard_D8s_v5
+    count: 1
+    acceleratedNetworking: true
+
+bnk:
+  manifestVersion: "2.4.0-3.2882.0"
+  deploymentSize: "small"
+  tmmCpu: "2"
+  tmmMemory: "4Gi"
+  tmmMtu: 1500
+  farArchive: "./keys/f5-far-auth-key.tgz"
+  jwt: "./keys/license.jwt"
+
+egress:
+  enabled: true
+  namespace: "default"
+  port: 4789
+
+testing:
+  enabled: true
+  targetHost: "f5.com"
+
+tags:
+  Environment: "Edge"
+  Location: "eastus2"
+  ZoneType: "AzureLocal"
+  ManagedBy: "azrbnkctl"

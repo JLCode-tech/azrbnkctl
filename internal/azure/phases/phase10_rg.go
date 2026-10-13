@@ -26,6 +26,19 @@ func Phase10ResourceGroup(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		return nil
 	}
 
+	// Try adopting existing resource group first to support scoped permissions
+	if existing, getErr := clients.ResourceGroups.Get(ctx, rgName, nil); getErr == nil {
+		if existing.ID != nil {
+			st.Set("AZURE_RESOURCE_GROUP_ID", *existing.ID)
+		}
+		st.Set("AZURE_RESOURCE_GROUP", rgName)
+		if err := st.Save(); err != nil {
+			return fmt.Errorf("phase10: saving state: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 10] adopting existing resource group %s OK\n", rgName)
+		return nil
+	}
+
 	rgTags := tags.ForCluster(cl.Metadata.Name, "rg", cl.Tags)
 
 	resp, err := clients.ResourceGroups.CreateOrUpdate(ctx, rgName, armresources.ResourceGroup{

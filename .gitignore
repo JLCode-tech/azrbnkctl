@@ -60,6 +60,7 @@ kubeconfig*
 .claude/
 CLAUDE.local.md
 *.maf.new
+ACTIVE_CONTEXT.md
 
 # --- Internal debugging, spikes & audit notes ---
 docs/audits/

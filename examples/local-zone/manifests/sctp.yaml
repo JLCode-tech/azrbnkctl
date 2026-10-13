@@ -1,0 +1,95 @@
+# SCTP (9000) reference for Azure Local / Edge Zones:
+# GatewaySettings, echo backend, Gateway with static VIP at 10.0.17.121, L4Route.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sctp-scenario
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: sctp-scenario
+  namespace: sctp-scenario
+spec:
+  ingressConfig:
+    defaultListenerNetwork:
+      ipamRefs:
+      - name: listener-pool
+      networkRefs:
+      - name: ext-vlan-infra
+      sourceNATConfig:
+        type: Automap
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sctp-echo-backend
+  namespace: sctp-scenario
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sctp-echo
+  template:
+    metadata:
+      labels:
+        app: sctp-echo
+    spec:
+      containers:
+      - name: sctp-echo
+        image: nicolaka/netshoot
+        command: ["socat", "SCTP-LISTEN:9000,fork", "EXEC:'cat'"]
+        ports:
+        - containerPort: 9000
+          protocol: SCTP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sctp-echo-backend
+  namespace: sctp-scenario
+spec:
+  selector:
+    app: sctp-echo
+  ports:
+  - port: 9000
+    targetPort: 9000
+    protocol: SCTP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: sctp-gateway
+  namespace: sctp-scenario
+spec:
+  gatewayClassName: poc-dual-interface-gatewayclass
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: sctp-scenario
+  addresses:
+  - type: IPAddress
+    value: 10.0.17.121
+  listeners:
+  - name: sctp-listen
+    protocol: SCTP
+    port: 9000
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.k8s.f5.com/v1
+kind: L4Route
+metadata:
+  name: sctp-route
+  namespace: sctp-scenario
+spec:
+  protocol: SCTP
+  parentRefs:
+  - name: sctp-gateway
+    sectionName: sctp-listen
+  rules:
+  - backendRefs:
+    - name: sctp-echo-backend
+      port: 9000

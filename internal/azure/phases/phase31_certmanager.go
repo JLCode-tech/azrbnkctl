@@ -47,10 +47,15 @@ func Phase31CertManager(ctx context.Context, cl *intent.Cluster, st *state.State
 	}
 
 	multusBytes, err := manifests.FS.ReadFile("multus/multus-crd.yaml")
-	if err == nil {
-		if multusObjs, err := k8s.ParseYAMLStream(multusBytes); err == nil {
-			_ = applier.ApplyAll(ctx, multusObjs, true)
-		}
+	if err != nil {
+		return fmt.Errorf("phase31: reading multus CRD: %w", err)
+	}
+	multusObjs, err := k8s.ParseYAMLStream(multusBytes)
+	if err != nil {
+		return fmt.Errorf("phase31: parsing multus CRD: %w", err)
+	}
+	if err := applier.ApplyAll(ctx, multusObjs, true); err != nil {
+		return fmt.Errorf("phase31: applying multus CRD: %w", err)
 	}
 
 	cs, err := k8s.NewClientsetFromConfig(cfg)
