@@ -5,6 +5,22 @@ All notable changes to `azrbnkctl` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/JLCode-tech/azrbnkctl/compare/v1.0.0...v1.1.0) (2026-10-07)
+
+
+### Features
+
+* **benchmark:** port benchmark subsystem and bidirectional agent daemon ([e7d340f](https://github.com/JLCode-tech/azrbnkctl/commit/e7d340f569a0211e31f8bf9a9bd118b8763e23b2))
+* **parity:** port BNK 2.4 migration, heal registry, agentic forge & scenarios from awsbnkctl ([7fc000d](https://github.com/JLCode-tech/azrbnkctl/commit/7fc000da80ba30b1075d923144ed790c28ed59a7))
+
+
+### Bug Fixes
+
+* **ci:** allowlist test fixture in .gitleaksignore and sanitize test string ([526e8b4](https://github.com/JLCode-tech/azrbnkctl/commit/526e8b4d3aae704a8c556801329cc46e9e1e114e))
+* **ci:** bump dependencies for govulncheck and add missing words to cspell ([162f74f](https://github.com/JLCode-tech/azrbnkctl/commit/162f74fabd0cdf99c6e9d1f77d2765bff091b638))
+* **dataplane:** configure TMM socket driver and eth0 vlan mapping for Azure AKS ([6995110](https://github.com/JLCode-tech/azrbnkctl/commit/699511089d031ca2fbb23ed6387216c80344f1b0))
+* **dataplane:** configure TMM socket driver and eth0 vlan mapping for Azure AKS ([#12](https://github.com/JLCode-tech/azrbnkctl/issues/12)) ([2b5f711](https://github.com/JLCode-tech/azrbnkctl/commit/2b5f711718704e7c27b49135dd6a9c3d0096d2e4))
+
 ## 1.0.0 (2026-09-03)
 
 ### Features
