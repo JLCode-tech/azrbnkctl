@@ -91,6 +91,8 @@ func runBenchmarkDaemon(cmd *cobra.Command, args []string) error {
 			Password: flagBenchForgePass,
 		},
 		AgentName:         agentName,
+		AgentToken:        flagBenchAgentToken,
+		WorkspaceDir:      resolveWorkspaceDir(),
 		Hostname:          hostname,
 		IPAddress:         ipAddr,
 		Tags:              map[string]string{"role": "benchmark-agent", "managed_by": "azrbnkctl"},

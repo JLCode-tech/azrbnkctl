@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"helm.sh/helm/v3/pkg/release"
+	appsv1 "k8s.io/api/apps/v1"
 	authv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -206,38 +209,130 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 	if deps.Helm == nil {
 		return nil, fmt.Errorf("upgrade: no Helm client")
 	}
-	releases, err := deps.Helm.List(phases.FLONamespace, "^"+phases.FLOReleaseName+"$")
-	if err != nil {
-		return nil, fmt.Errorf("list helm release %s: %w", phases.FLOReleaseName, err)
-	}
-	if len(releases) == 0 {
-		return nil, fmt.Errorf("helm release %s not found in %s: bnk upgrade moves an existing install; use azrbnkctl up for a new cluster", phases.FLOReleaseName, phases.FLONamespace)
-	}
-	existing := releases[0]
-	if existing.Chart != nil && existing.Chart.Metadata != nil {
-		res.FLOFrom = existing.Chart.Metadata.Version
-	}
-	values := opts.Values
-	if values == nil {
-		values = existing.Config
-	}
-	switch {
-	case res.FLOFrom == floChart:
-		fmt.Fprintf(opts.Log, "[upgrade] step 1: FLO release %s already at %s\n", phases.FLOReleaseName, floChart)
-	case opts.DryRun:
-		fmt.Fprintf(opts.Log, "[upgrade] step 1: dry-run: would helm upgrade %s %s -> %s (%s)\n", phases.FLOReleaseName, res.FLOFrom, floChart, phases.FLOChartRef)
-	default:
-		fmt.Fprintf(opts.Log, "[upgrade] step 1: pulling %s@%s\n", phases.FLOChartRef, floChart)
-		ch, err := deps.Helm.PullAndLoad(phases.FLOChartRef, floChart)
-		if err != nil {
-			return res, fmt.Errorf("pull FLO chart %s: %w", floChart, err)
+	var existing *release.Release
+	var releaseNS string
+	for _, ns := range []string{phases.FLONamespace, opts.Namespace} {
+		if ns == "" {
+			continue
 		}
-		fmt.Fprintf(opts.Log, "[upgrade] step 1: helm upgrade %s %s -> %s\n", phases.FLOReleaseName, res.FLOFrom, floChart)
-		if _, err := deps.Helm.Upgrade(phases.FLOReleaseName, phases.FLONamespace, ch, values); err != nil {
-			return res, fmt.Errorf("helm upgrade %s: %w", phases.FLOReleaseName, err)
+		for _, name := range []string{phases.FLOReleaseName, "flo"} {
+			rels, err := deps.Helm.List(ns, "^"+name+"$")
+			if err == nil && len(rels) > 0 {
+				existing = rels[0]
+				releaseNS = ns
+				break
+			}
 		}
-		res.FLOUpgraded = true
-		fmt.Fprintf(opts.Log, "[upgrade] step 1: helm upgrade complete\n")
+		if existing != nil {
+			break
+		}
+	}
+
+	if existing != nil {
+		if existing.Chart != nil && existing.Chart.Metadata != nil {
+			res.FLOFrom = existing.Chart.Metadata.Version
+		}
+		values := opts.Values
+		if values == nil {
+			values = existing.Config
+		}
+		switch {
+		case res.FLOFrom == floChart:
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: FLO release %s already at %s\n", existing.Name, floChart)
+		case opts.DryRun:
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: dry-run: would helm upgrade %s %s -> %s (%s)\n", existing.Name, res.FLOFrom, floChart, phases.FLOChartRef)
+		default:
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: pulling %s@%s\n", phases.FLOChartRef, floChart)
+			ch, err := deps.Helm.PullAndLoad(phases.FLOChartRef, floChart)
+			if err != nil {
+				return res, fmt.Errorf("pull FLO chart %s: %w", floChart, err)
+			}
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: helm upgrade %s in %s %s -> %s\n", existing.Name, releaseNS, res.FLOFrom, floChart)
+			if _, err := deps.Helm.Upgrade(existing.Name, releaseNS, ch, values); err != nil {
+				return res, fmt.Errorf("helm upgrade %s: %w", existing.Name, err)
+			}
+			res.FLOUpgraded = true
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: helm upgrade complete\n")
+		}
+	} else {
+		// No Helm release found. Check if FLO was installed via static Deployment (e.g. Phase32FLO).
+		var floDep *appsv1.Deployment
+		var floNS string
+		if deps.K8s != nil {
+			for _, ns := range []string{opts.Namespace, phases.FLONamespace} {
+				if ns == "" {
+					continue
+				}
+				for _, name := range []string{"flo-f5-lifecycle-operator", "f5-lifecycle-operator"} {
+					d, err := deps.K8s.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+					if err == nil {
+						floDep = d
+						floNS = ns
+						break
+					}
+				}
+				if floDep != nil {
+					break
+				}
+			}
+		}
+		if floDep == nil {
+			return nil, fmt.Errorf("helm release or FLO deployment not found in %s or %s: bnk upgrade moves an existing install; use azrbnkctl up for a new cluster", phases.FLONamespace, opts.Namespace)
+		}
+
+		for _, c := range floDep.Spec.Template.Spec.Containers {
+			parts := strings.Split(c.Image, ":")
+			if len(parts) > 1 {
+				res.FLOFrom = parts[len(parts)-1]
+				break
+			}
+		}
+
+		switch {
+		case res.FLOFrom == floChart:
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: FLO deployment %s in %s already at %s\n", floDep.Name, floNS, floChart)
+		case opts.DryRun:
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: dry-run: would upgrade FLO deployment %s in %s %s -> %s (%s)\n", floDep.Name, floNS, res.FLOFrom, floChart, phases.FLOChartRef)
+		default:
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: pulling %s@%s\n", phases.FLOChartRef, floChart)
+			ch, err := deps.Helm.PullAndLoad(phases.FLOChartRef, floChart)
+			if err != nil {
+				return res, fmt.Errorf("pull FLO chart %s: %w", floChart, err)
+			}
+			if deps.Applier != nil {
+				for _, dep := range ch.Dependencies() {
+					if dep.Name() == "crds" {
+						for _, t := range dep.Templates {
+							if strings.HasSuffix(t.Name, ".yaml") || strings.HasSuffix(t.Name, ".yml") {
+								objs, err := k8swait.ParseYAMLStream(t.Data)
+								if err == nil {
+									for _, obj := range objs {
+										_ = deps.Applier.Apply(ctx, obj)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			targetImg := fmt.Sprintf("repo.f5.com/images/f5-lifecycle-operator:%s", floChart)
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: updating FLO deployment %s image to %s\n", floDep.Name, targetImg)
+			for i := range floDep.Spec.Template.Spec.Containers {
+				if floDep.Spec.Template.Spec.Containers[i].Name == "f5-lifecycle-operator" || len(floDep.Spec.Template.Spec.Containers) == 1 {
+					floDep.Spec.Template.Spec.Containers[i].Image = targetImg
+					floDep.Spec.Template.Spec.Containers[i].ImagePullPolicy = corev1.PullAlways
+				}
+			}
+			if _, err := deps.K8s.AppsV1().Deployments(floNS).Update(ctx, floDep, metav1.UpdateOptions{}); err != nil {
+				return res, fmt.Errorf("update FLO deployment %s: %w", floDep.Name, err)
+			}
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: waiting for FLO deployment %s rollout\n", floDep.Name)
+			if err := k8swait.WaitForDeploymentReady(ctx, deps.K8s, floNS, floDep.Name, opts.Timeout); err != nil {
+				return res, fmt.Errorf("wait for FLO deployment %s: %w", floDep.Name, err)
+			}
+			res.FLOUpgraded = true
+			fmt.Fprintf(opts.Log, "[upgrade] step 1: FLO deployment upgrade complete\n")
+		}
 	}
 
 	// Step 2: CNEInstance.
@@ -449,6 +544,9 @@ func controllerPodsHaveFlag(ctx context.Context, cs kubernetes.Interface, ns str
 		return false, nil
 	}
 	for _, p := range pods.Items {
+		if p.DeletionTimestamp != nil {
+			continue
+		}
 		has := false
 		for _, c := range p.Spec.Containers {
 			for _, e := range c.Env {

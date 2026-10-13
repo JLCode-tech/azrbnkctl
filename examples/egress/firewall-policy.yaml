@@ -1,0 +1,49 @@
+# BNK egress demo — firewall on the egress path. Apply after workload.yaml
+# (it needs the bnk-egress-demo namespace) and before or after the toggle.
+#
+# Blocks 1.1.1.1 for captured pods, allows everything else, logs both. On
+# BNK 2.4 a firewall reaches egress through a SecPolicy that targets the
+# EgressGateway; the policy and its address list live in the same namespace
+# as the SecPolicy.
+apiVersion: k8s.f5net.com/v1
+kind: F5BigCneAddresslist
+metadata:
+  name: egress-demo-blocked
+  namespace: bnk-egress-demo
+spec:
+  addresses:
+    - 1.1.1.1/32
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5BigFwPolicy
+metadata:
+  name: egress-demo-fw
+  namespace: bnk-egress-demo
+spec:
+  rule:
+    - name: block-test-target
+      action: drop
+      ipProtocol: any
+      destination:
+        addressLists:
+          - egress-demo-blocked
+      logging: true
+    - name: default-allow
+      action: accept
+      ipProtocol: any
+      logging: true
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: SecPolicy
+metadata:
+  name: egress-demo-fw
+  namespace: bnk-egress-demo
+spec:
+  targetRefs:
+  - group: gateway.k8s.f5.com
+    kind: EgressGateway
+    name: bnk-egress-demo
+  extensionRefs:
+  - group: k8s.f5net.com
+    kind: F5BigFwPolicy
+    name: egress-demo-fw

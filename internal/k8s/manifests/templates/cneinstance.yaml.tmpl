@@ -22,10 +22,13 @@ spec:
     imagePullSecrets:
       - name: far-secret
     imagePullPolicy: Always
+{{- if .NetworkAttachments }}
   networkAttachments:
-    - tmm-ext
-{{- if .IntPCI }}
-    - tmm-int
+{{- range .NetworkAttachments }}
+    - {{ . }}
+{{- end }}
+{{- else }}
+  networkAttachments: []
 {{- end }}
   dynamicRouting:
     enabled: false
@@ -39,6 +42,8 @@ spec:
     enabled: true
   tmmReplicas: 1
   advanced:
+    coremon:
+      hostPath: true
     envDiscovery:
       runAfterSuccess: true
       stopOnFail: true
@@ -66,7 +71,7 @@ spec:
         - name: TMM_DEFAULT_MTU
           value: "{{ .TmmMtu }}"
         - name: PAL_CPU_SET
-          value: "0-3"
+          value: "{{ if .PalCpuSet }}{{ .PalCpuSet }}{{ else }}0,2{{ end }}"
         - name: ZEBOS_STATE
           value: legacy
         - name: TMM_GENERIC_SOCKET_DRIVER
@@ -74,4 +79,5 @@ spec:
         - name: TMM_MAPRES_ADDL_VETHS_ON_DP
           value: "TRUE"
         - name: TMM_MAPRES_IFC_CLAIM_LIST
-          value: net1
+          value: "{{ if .IntPCI }}net1,net2{{ else }}net1{{ end }}"
+

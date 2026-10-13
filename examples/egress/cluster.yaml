@@ -1,0 +1,57 @@
+apiVersion: azrbnkctl/v1
+kind: Cluster
+
+metadata:
+  name: bnk-egress
+  subscriptionId: 00000000-0000-0000-0000-000000000000
+  location: eastus2
+  resourceGroup: azrbnkctl-bnk-egress-rg
+
+# external-only: single external interface, CNI backend.
+# This is the cost-efficient egress pattern where outbound traffic from selected
+# namespaces is routed through TMM for SNAT and firewall inspection.
+pattern: external-only
+
+network:
+  vnetCidr: 10.0.0.0/16
+  subnets:
+    system: 10.0.0.0/20
+    public: 10.0.16.0/28
+    external: 10.0.17.0/24
+
+cluster:
+  kubernetesVersion: "1.32.0"
+  networkPlugin: azure
+  networkPluginMode: Overlay
+  systemNodePool:
+    name: system
+    vmSize: Standard_D4s_v5
+    count: 2
+  tmmNodePool:
+    name: tmm
+    vmSize: Standard_D8s_v5
+    count: 1
+    acceleratedNetworking: true
+
+bnk:
+  manifestVersion: "2.4.0-3.2882.0"
+  deploymentSize: "small"
+  tmmCpu: "2"
+  tmmMemory: "4Gi"
+  tmmMtu: 1500
+  farArchive: "./keys/f5-far-auth-key.tgz"
+  jwt: "./keys/license.jwt"
+
+egress:
+  enabled: true
+  namespace: "bnk-egress-demo"
+  port: 4789
+
+testing:
+  enabled: true
+  targetHost: "f5.com"
+
+tags:
+  Environment: "Demo"
+  Blueprint: "egress"
+  ManagedBy: "azrbnkctl"
