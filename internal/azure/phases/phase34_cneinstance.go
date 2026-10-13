@@ -26,22 +26,34 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 	}
 
 	tmmK8sRoutes := "10.240.0.0/16"
-	if svcCIDR := st.Get(ServiceCIDRStateKey); svcCIDR != "" {
+	if svcCIDR := st.Get(ServiceCIDRStateKey); svcCIDR != "" && svcCIDR != "10.0.0.0/16" {
 		tmmK8sRoutes = svcCIDR
+	} else if svcCIDR == "10.0.0.0/16" {
+		st.Set(ServiceCIDRStateKey, tmmK8sRoutes)
+		_ = st.Save()
+	}
+
+	var nads []string
+	if extPCI != "" {
+		nads = append(nads, "tmm-ext")
+	}
+	if intPCI != "" {
+		nads = append(nads, "tmm-int")
 	}
 
 	data := render.CNEInstanceData{
-		ManifestVersion: cl.Bnk.ManifestVersion,
-		DeploymentSize:  cl.Bnk.DeploymentSize,
-		TmmCpu:          cl.Bnk.TmmCpu,
-		TmmMemory:       cl.Bnk.TmmMemory,
-		TmmMtu:          cl.Bnk.TmmMtu,
-		ExtPCI:          extPCI,
-		IntPCI:          intPCI,
-		Telemetry:       cl.Bnk.Telemetry,
-		PalCpuSet:       palCpuSet,
-		SkipNics:        "eth0",
-		TmmK8sRoutes:    tmmK8sRoutes,
+		ManifestVersion:    cl.Bnk.ManifestVersion,
+		DeploymentSize:     cl.Bnk.DeploymentSize,
+		TmmCpu:             cl.Bnk.TmmCpu,
+		TmmMemory:          cl.Bnk.TmmMemory,
+		TmmMtu:             cl.Bnk.TmmMtu,
+		ExtPCI:             extPCI,
+		IntPCI:             intPCI,
+		Telemetry:          cl.Bnk.Telemetry,
+		PalCpuSet:          palCpuSet,
+		NetworkAttachments: nads,
+		SkipNics:           "eth0",
+		TmmK8sRoutes:       tmmK8sRoutes,
 	}
 
 	rendered, err := render.RenderCNEInstance(data)

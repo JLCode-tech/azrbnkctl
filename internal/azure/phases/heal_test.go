@@ -5,11 +5,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
+	"github.com/JLCode-tech/azrbnkctl/internal/k8s/render"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -193,4 +198,191 @@ func TestRepairTestNamespace(t *testing.T) {
 			t.Errorf("DetectAll on an empty cluster: %+v", s)
 		}
 	}
+}
+
+func cneForHeal(manifestVersion string, env []any) *unstructured.Unstructured {
+	spec := map[string]any{
+		"manifestVersion": manifestVersion,
+	}
+	if env != nil {
+		spec["advanced"] = map[string]any{
+			"tmm": map[string]any{
+				"env": env,
+			},
+		}
+	}
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "k8s.f5.com/v1",
+			"kind":       "CNEInstance",
+			"metadata": map[string]any{
+				"name":      "instance",
+				"namespace": InstanceNamespace,
+			},
+			"spec": spec,
+		},
+	}
+}
+
+func fakeDynamicCNE(cne *unstructured.Unstructured) *dynamicfake.FakeDynamicClient {
+	scheme := runtime.NewScheme()
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "k8s.f5.com", Version: "v1", Kind: "CNEInstance"},
+		&unstructured.Unstructured{},
+	)
+	scheme.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "k8s.f5.com", Version: "v1", Kind: "CNEInstanceList"},
+		&unstructured.UnstructuredList{},
+	)
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		scheme,
+		map[schema.GroupVersionResource]string{
+			healCNEInstanceGVR: "CNEInstanceList",
+		},
+	)
+	if cne != nil {
+		_, _ = dyn.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).Create(
+			context.Background(), cne, metav1.CreateOptions{},
+		)
+	}
+	return dyn
+}
+
+func TestDetectTMMK8sRoutes(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no CNEInstance", func(t *testing.T) {
+		d := healDeps()
+		d.Clients.Dynamic = fakeDynamicCNE(nil)
+		ok, detail, err := detectTMMK8sRoutes(ctx, d)
+		if err != nil || !ok || !strings.Contains(detail, "no CNEInstance") {
+			t.Errorf("expected healthy with no CNEInstance, got ok=%v, detail=%q, err=%v", ok, detail, err)
+		}
+	})
+
+	t.Run("2.4 without routes", func(t *testing.T) {
+		cne := cneForHeal("2.4.0", nil)
+		d := healDeps()
+		d.Clients.Dynamic = fakeDynamicCNE(cne)
+		ok, detail, err := detectTMMK8sRoutes(ctx, d)
+		if err != nil || ok || !strings.Contains(detail, "has no "+render.TMMK8sRoutesEnv) {
+			t.Errorf("expected unhealthy without routes, got ok=%v, detail=%q, err=%v", ok, detail, err)
+		}
+	})
+
+	t.Run("2.4 with vnet default 10.0.0.0/16", func(t *testing.T) {
+		cne := cneForHeal("2.4.0", []any{
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.0.0.0/16"},
+		})
+		d := healDeps()
+		d.Clients.Dynamic = fakeDynamicCNE(cne)
+		ok, detail, err := detectTMMK8sRoutes(ctx, d)
+		if err != nil || ok || !strings.Contains(detail, "set to VNet CIDR 10.0.0.0/16 instead of AKS Service CIDR") {
+			t.Errorf("expected unhealthy with 10.0.0.0/16, got ok=%v, detail=%q, err=%v", ok, detail, err)
+		}
+	})
+
+	t.Run("2.4 with duplicate routes", func(t *testing.T) {
+		cne := cneForHeal("2.4.0", []any{
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.240.0.0/16"},
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.0.0.0/16"},
+		})
+		d := healDeps()
+		d.Clients.Dynamic = fakeDynamicCNE(cne)
+		ok, detail, err := detectTMMK8sRoutes(ctx, d)
+		if err != nil || ok || !strings.Contains(detail, "duplicate") {
+			t.Errorf("expected unhealthy with duplicate routes, got ok=%v, detail=%q, err=%v", ok, detail, err)
+		}
+	})
+
+	t.Run("2.4 with AKS service CIDR 10.240.0.0/16", func(t *testing.T) {
+		cne := cneForHeal("2.4.0", []any{
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.240.0.0/16"},
+		})
+		d := healDeps()
+		d.Clients.Dynamic = fakeDynamicCNE(cne)
+		ok, detail, err := detectTMMK8sRoutes(ctx, d)
+		if err != nil || !ok || !strings.Contains(detail, render.TMMK8sRoutesEnv+"=10.240.0.0/16") {
+			t.Errorf("expected healthy with 10.240.0.0/16, got ok=%v, detail=%q, err=%v", ok, detail, err)
+		}
+	})
+}
+
+func TestFixTMMK8sRoutes(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty state defaults to 10.240.0.0/16", func(t *testing.T) {
+		cne := cneForHeal("2.4.0", []any{
+			map[string]any{"name": "TMM_CALICO_ROUTER", "value": "default"},
+		})
+		st, err := state.New(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := healDeps()
+		d.State = st
+		dyn := fakeDynamicCNE(cne)
+		d.Clients.Dynamic = dyn
+
+		detail, err := fixTMMK8sRoutes(ctx, d)
+		if err != nil {
+			t.Fatalf("fixTMMK8sRoutes failed: %v", err)
+		}
+		if !strings.Contains(detail, "10.240.0.0/16") {
+			t.Errorf("expected detail to mention 10.240.0.0/16, got %q", detail)
+		}
+		if st.Get(ServiceCIDRStateKey) != "10.240.0.0/16" {
+			t.Errorf("expected state to have 10.240.0.0/16, got %q", st.Get(ServiceCIDRStateKey))
+		}
+
+		patched, err := dyn.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).Get(ctx, "instance", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vals := tmmEnvValues(patched, render.TMMK8sRoutesEnv)
+		if len(vals) != 1 || vals[0] != "10.240.0.0/16" {
+			t.Errorf("expected [10.240.0.0/16], got %v", vals)
+		}
+		if v, _ := tmmEnvValue(patched, "TMM_CALICO_ROUTER"); v != "default" {
+			t.Errorf("expected other env to be preserved, got %q", v)
+		}
+	})
+
+	t.Run("heals state and cne previously set to 10.0.0.0/16 without duplicates", func(t *testing.T) {
+		cne := cneForHeal("2.4.0", []any{
+			map[string]any{"name": "TMM_CALICO_ROUTER", "value": "default"},
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.0.0.0/16"},
+			map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.0.0.0/16"},
+		})
+		st, err := state.New(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Set(ServiceCIDRStateKey, "10.0.0.0/16")
+
+		d := healDeps()
+		d.State = st
+		dyn := fakeDynamicCNE(cne)
+		d.Clients.Dynamic = dyn
+
+		detail, err := fixTMMK8sRoutes(ctx, d)
+		if err != nil {
+			t.Fatalf("fixTMMK8sRoutes failed: %v", err)
+		}
+		if !strings.Contains(detail, "10.240.0.0/16") {
+			t.Errorf("expected detail to mention 10.240.0.0/16, got %q", detail)
+		}
+		if st.Get(ServiceCIDRStateKey) != "10.240.0.0/16" {
+			t.Errorf("expected state healed to 10.240.0.0/16, got %q", st.Get(ServiceCIDRStateKey))
+		}
+
+		patched, err := dyn.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).Get(ctx, "instance", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vals := tmmEnvValues(patched, render.TMMK8sRoutesEnv)
+		if len(vals) != 1 || vals[0] != "10.240.0.0/16" {
+			t.Errorf("expected exactly 1 entry with 10.240.0.0/16, got %v", vals)
+		}
+	})
 }

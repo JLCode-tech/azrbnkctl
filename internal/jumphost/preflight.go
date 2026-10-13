@@ -67,10 +67,10 @@ func CheckServedModel(ctx context.Context, probOpts ProbeOptions, requestedModel
 		return nil
 	}
 	if probOpts.User == "" {
-		probOpts.User = "ec2-user"
+		probOpts.User = DefaultSSHUser
 	}
 
-	keyPath, pubKeyPath, cleanup, err := prepareEICEKeyFn(ctx, probOpts.Region, probOpts.InstanceID)
+	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, probOpts)
 	if err != nil {
 		// Non-fatal transport error — log and proceed.
 		fmt.Fprintf(os.Stderr, "[preflight] could not prepare EICE key for /v1/models check: %v — proceeding\n", err)
@@ -78,11 +78,13 @@ func CheckServedModel(ctx context.Context, probOpts ProbeOptions, requestedModel
 	}
 	defer cleanup()
 
-	_ = pushSSHPublicKeyFn(ctx, probOpts.Region, probOpts.InstanceID, pubKeyPath)
+	if pubKeyPath != "" {
+		_ = pushSSHPublicKeyFn(ctx, probOpts.EffectiveLocation(), probOpts.EffectiveVMName(), pubKeyPath)
+	}
 
 	remoteCmd := buildModelsQueryCmd(probOpts.VIP, probOpts.Hostname)
 
-	stdout, sshErr := aiperfSSHExecFn(ctx, probOpts.Region, probOpts.InstanceID, keyPath, remoteCmd)
+	stdout, sshErr := aiperfSSHExecFn(ctx, probOpts.EffectiveLocation(), probOpts.EffectiveVMName(), keyPath, remoteCmd)
 	if sshErr != nil {
 		// Non-fatal: SSH or curl failure. Log and let the caller proceed.
 		fmt.Fprintf(os.Stderr, "[preflight] /v1/models query failed (non-fatal, proceeding): %v\n", sshErr)

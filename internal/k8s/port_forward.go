@@ -13,17 +13,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
-
-// IOStreams holds standard stream writers.
-type IOStreams struct {
-	In     io.Reader
-	Out    io.Writer
-	ErrOut io.Writer
-}
 
 // PortForwardOptions captures the inputs to port-forward operations.
 type PortForwardOptions struct {
@@ -32,7 +26,7 @@ type PortForwardOptions struct {
 	Ports          []string
 	KubeconfigPath string
 
-	IOStreams IOStreams
+	IOStreams genericiooptions.IOStreams
 
 	StopCh  chan struct{}
 	ReadyCh chan struct{}

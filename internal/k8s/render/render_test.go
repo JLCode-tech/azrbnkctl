@@ -7,14 +7,16 @@ import (
 
 func TestRenderCNEInstance(t *testing.T) {
 	data := CNEInstanceData{
-		ManifestVersion: "2.3.2",
-		DeploymentSize:  "Small",
-		TmmCpu:          "4",
-		TmmMemory:       "10Gi",
-		TmmMtu:          1500,
-		ExtPCI:          "0001:00:01.0",
-		IntPCI:          "0001:00:02.0",
-		Telemetry:       false,
+		ManifestVersion:    "2.3.2",
+		DeploymentSize:     "Small",
+		TmmCpu:             "4",
+		TmmMemory:          "10Gi",
+		TmmMtu:             1500,
+		ExtPCI:             "0001:00:01.0",
+		IntPCI:             "0001:00:02.0",
+		Telemetry:          false,
+		NetworkAttachments: []string{"tmm-ext", "tmm-int"},
+		TmmK8sRoutes:       "10.240.0.0/16",
 	}
 
 	out, err := RenderCNEInstance(data)
@@ -37,6 +39,39 @@ func TestRenderCNEInstance(t *testing.T) {
 	}
 	if !strings.Contains(str, "TMM_MAPRES_IFC_CLAIM_LIST") || !strings.Contains(str, "net1,net2") {
 		t.Errorf("expected TMM_MAPRES_IFC_CLAIM_LIST with net1,net2 in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "USE_GATEWAY_SETTINGS") || !strings.Contains(str, `value: "true"`) {
+		t.Errorf("expected USE_GATEWAY_SETTINGS in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "MAX_ACTIVE_TMM_REPLICAS") || !strings.Contains(str, `value: "32"`) {
+		t.Errorf("expected MAX_ACTIVE_TMM_REPLICAS in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "TMM_K8S_ROUTES") || !strings.Contains(str, `value: "10.240.0.0/16"`) {
+		t.Errorf("expected TMM_K8S_ROUTES in output, got:\n%s", str)
+	}
+	if !strings.Contains(str, "- tmm-ext") || !strings.Contains(str, "- tmm-int") {
+		t.Errorf("expected network attachments tmm-ext and tmm-int in output, got:\n%s", str)
+	}
+}
+
+func TestRenderCNEInstance_DefaultRoutesAndAttachments(t *testing.T) {
+	data := CNEInstanceData{
+		ManifestVersion: "2.4.0",
+		DeploymentSize:  "Small",
+		TmmMtu:          1500,
+	}
+
+	out, err := RenderCNEInstance(data)
+	if err != nil {
+		t.Fatalf("RenderCNEInstance failed: %v", err)
+	}
+
+	str := string(out)
+	if strings.Contains(str, "TMM_K8S_ROUTES") {
+		t.Errorf("expected no TMM_K8S_ROUTES when empty, got:\n%s", str)
+	}
+	if !strings.Contains(str, "networkAttachments: []") {
+		t.Errorf("expected networkAttachments: [] when empty, got:\n%s", str)
 	}
 }
 

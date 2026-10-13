@@ -165,6 +165,88 @@ func TestBuildHTTPResponderStopCmd(t *testing.T) {
 	}
 }
 
+func TestProbeOptions_DefaultsAndFallbacks(t *testing.T) {
+	if jumphost.DefaultSSHUser != "azureuser" {
+		t.Fatalf("expected DefaultSSHUser to be 'azureuser', got %q", jumphost.DefaultSSHUser)
+	}
+
+	opts := jumphost.ProbeOptions{}
+	if user := opts.EffectiveUser(); user != "azureuser" {
+		t.Errorf("expected EffectiveUser() to default to azureuser, got %q", user)
+	}
+
+	opts.User = "customuser"
+	if user := opts.EffectiveUser(); user != "customuser" {
+		t.Errorf("expected EffectiveUser() customuser, got %q", user)
+	}
+
+	// EffectiveLocation
+	optsLoc := jumphost.ProbeOptions{Region: "eastus"}
+	if loc := optsLoc.EffectiveLocation(); loc != "eastus" {
+		t.Errorf("expected EffectiveLocation() fallback to Region, got %q", loc)
+	}
+	optsLoc.Location = "eastus2"
+	if loc := optsLoc.EffectiveLocation(); loc != "eastus2" {
+		t.Errorf("expected EffectiveLocation() to prioritize Location, got %q", loc)
+	}
+
+	// EffectiveVMName
+	optsVM := jumphost.ProbeOptions{InstanceID: "vm-123"}
+	if vm := optsVM.EffectiveVMName(); vm != "vm-123" {
+		t.Errorf("expected EffectiveVMName() fallback to InstanceID, got %q", vm)
+	}
+	optsVM.VMName = "jumphost-0"
+	if vm := optsVM.EffectiveVMName(); vm != "jumphost-0" {
+		t.Errorf("expected EffectiveVMName() to prioritize VMName, got %q", vm)
+	}
+
+	// TargetHost
+	optsHost := jumphost.ProbeOptions{SourceIP: "10.0.1.5"}
+	if h := optsHost.TargetHost(); h != "10.0.1.5" {
+		t.Errorf("expected TargetHost() fallback to SourceIP, got %q", h)
+	}
+	optsHost.VMName = "vm-jumphost"
+	if h := optsHost.TargetHost(); h != "vm-jumphost" {
+		t.Errorf("expected TargetHost() to pick VMName over SourceIP, got %q", h)
+	}
+	optsHost.JumphostIP = "10.0.0.4"
+	if h := optsHost.TargetHost(); h != "10.0.0.4" {
+		t.Errorf("expected TargetHost() to prioritize JumphostIP, got %q", h)
+	}
+}
+
+func TestBuildSSHArgs_DirectAndBastion(t *testing.T) {
+	// Direct SSH args
+	directArgs := jumphost.BuildSSHArgs("azureuser", "10.0.0.4", "/tmp/key", false, "", "eastus2", "uptime")
+	joinedDirect := strings.Join(directArgs, " ")
+	if !strings.Contains(joinedDirect, "-i /tmp/key") {
+		t.Errorf("direct SSH missing -i key: %s", joinedDirect)
+	}
+	if !strings.Contains(joinedDirect, "azureuser@10.0.0.4") {
+		t.Errorf("direct SSH missing user@host: %s", joinedDirect)
+	}
+	if !strings.Contains(joinedDirect, "uptime") {
+		t.Errorf("direct SSH missing command: %s", joinedDirect)
+	}
+	if strings.Contains(joinedDirect, "ProxyCommand") {
+		t.Errorf("direct SSH should not have ProxyCommand: %s", joinedDirect)
+	}
+
+	// Azure Bastion tunnel args
+	resID := "/subscriptions/000/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm"
+	bastionArgs := jumphost.BuildSSHArgs("azureuser", "vm", "/tmp/key", true, resID, "eastus2", "whoami")
+	joinedBastion := strings.Join(bastionArgs, " ")
+	if !strings.Contains(joinedBastion, "ProxyCommand=az network bastion tunnel") {
+		t.Errorf("bastion SSH missing ProxyCommand: %s", joinedBastion)
+	}
+	if !strings.Contains(joinedBastion, "--target-resource-id "+resID) {
+		t.Errorf("bastion SSH missing target-resource-id: %s", joinedBastion)
+	}
+	if !strings.Contains(joinedBastion, "--resource-port 22") {
+		t.Errorf("bastion SSH missing --resource-port 22: %s", joinedBastion)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
