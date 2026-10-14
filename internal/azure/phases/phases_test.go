@@ -165,6 +165,26 @@ bnk:
 		t.Fatalf("Phase37 failed: %v", err)
 	}
 
+	// Phase 38
+	if err := Phase38CWCHeal(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38 failed: %v", err)
+	}
+
+	// Phase 38b
+	if err := Phase38bDSSMInsecureOverlay(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38b failed: %v", err)
+	}
+
+	// Phase 38c
+	if err := Phase38cPodManagerHeal(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38c failed: %v", err)
+	}
+
+	// Phase 38d
+	if err := Phase38dTMMLogStream(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38d failed: %v", err)
+	}
+
 	// Phase 40
 	if err := Phase40Activation(ctx, cl, st, clients, dryRun); err != nil {
 		t.Fatalf("Phase40 failed: %v", err)

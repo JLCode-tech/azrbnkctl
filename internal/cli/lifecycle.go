@@ -108,6 +108,10 @@ var upPhases = []upPhase{
 	{num: "35", name: "license", fn: phases.Phase35License},
 	{num: "36", name: "gateway-api", fn: phases.Phase36GatewayAPI},
 	{num: "37", name: "vlans-routes", fn: phases.Phase37VlansRoutes},
+	{num: "38", name: "cwc-heal", fn: phases.Phase38CWCHeal},
+	{num: "38b", name: "dssm-overlay", fn: phases.Phase38bDSSMInsecureOverlay},
+	{num: "38c", name: "pod-manager-heal", fn: phases.Phase38cPodManagerHeal},
+	{num: "38d", name: "tmm-log-stream", fn: phases.Phase38dTMMLogStream},
 	{num: "40", name: "activation", fn: phases.Phase40Activation},
 	{num: "50", name: "egress", fn: phases.Phase50Egress},
 }
