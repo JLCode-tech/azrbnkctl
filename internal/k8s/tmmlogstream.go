@@ -44,7 +44,7 @@ func TMMLogStreamEnabled(ctx context.Context, cs kubernetes.Interface) (bool, er
 	cm, err := cs.CoreV1().ConfigMaps(TMMLogNamespace).Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			cm, err = cs.CoreV1().ConfigMaps("f5-bnk").Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
+			cm, err = cs.CoreV1().ConfigMaps("f5-cne-system").Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
@@ -75,13 +75,13 @@ func EnableTMMLogStream(ctx context.Context, cs kubernetes.Interface, timeout ti
 	ns := TMMLogNamespace
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			cm, err = cs.CoreV1().ConfigMaps("f5-bnk").Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
-			ns = "f5-bnk"
+			cm, err = cs.CoreV1().ConfigMaps("f5-cne-system").Get(ctx, TMMLogCustomConfigMap, metav1.GetOptions{})
+			ns = "f5-cne-system"
 			if err != nil {
 				if apierrors.IsNotFound(err) {
 					return false, nil
 				}
-				return false, fmt.Errorf("get configmap f5-bnk/%s: %w", TMMLogCustomConfigMap, err)
+				return false, fmt.Errorf("get configmap f5-cne-system/%s: %w", TMMLogCustomConfigMap, err)
 			}
 		} else {
 			return false, fmt.Errorf("get configmap %s/%s: %w", TMMLogNamespace, TMMLogCustomConfigMap, err)

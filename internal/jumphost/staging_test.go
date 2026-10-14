@@ -34,6 +34,7 @@ func installSeams(
 	errOn map[string]error,
 ) (restore func()) {
 	t.Helper()
+	t.Setenv("AZRBNKCTL_FORCE_SSH", "1")
 
 	origMint := *jumphost.PrepareEICEKeyFn
 	origSSH := *jumphost.SSHRunViaEICEFn
@@ -73,8 +74,8 @@ func installSeams(
 
 func opts() jumphost.ProbeOptions {
 	return jumphost.ProbeOptions{
-		Region:     "ap-southeast-2",
-		InstanceID: "i-test",
+		Region:     "eastus2",
+		InstanceID: "jumphost-vm",
 		SourceIP:   "10.0.10.120",
 	}
 }
@@ -244,6 +245,7 @@ type stdinRunRecord struct {
 // recording each command and its full stdin payload.
 func installStdinSeams(t *testing.T, mint *mintRecord, pushes *pushRecord, runs *stdinRunRecord, runErr error) (restore func()) {
 	t.Helper()
+	t.Setenv("AZRBNKCTL_FORCE_SSH", "1")
 
 	origMint := *jumphost.PrepareEICEKeyFn
 	origStdin := *jumphost.SSHRunViaEICEStdinFn

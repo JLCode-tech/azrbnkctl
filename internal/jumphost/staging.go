@@ -6,35 +6,56 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"regexp"
 )
+
+var interfaceFlagRegex = regexp.MustCompile(`--interface\s+\S+\s*`)
+
+func stripInterfaceFlag(cmd string) string {
+	return interfaceFlagRegex.ReplaceAllString(cmd, "")
+}
+
+func shouldUseProbe(ctx context.Context) bool {
+	if os.Getenv("AZRBNKCTL_FORCE_SSH") == "1" {
+		return false
+	}
+	if os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" {
+		return true
+	}
+	return IsProbePodRunning(ctx)
+}
 
 // Package-level function-variable seams consumed ONLY by the staging helpers
 // (RunStagingCommands, RunStagingCommandWithStdin, CopyFileViaEICE,
 // CopyFileViaEICEStdin). Default to the real implementations. Tests override
 // these via export_test.go to assert command sequencing without network.
-//
-// Do NOT route RunCurlProbes / StartHTTPResponder / etc. through these seams —
-// those paths are left byte-for-byte untouched.
 var (
-	prepareEICEKeyFn     = prepareEICEKey
-	sshRunViaEICEFn      = SSHRunViaEICE
-	sshRunViaEICEStdinFn = SSHRunViaEICEWithStdin
-	pushSSHPublicKeyFn   = PushSSHPublicKey
+	prepareEICEKeyFn       = prepareEICEKey
+	sshRunViaEICEFn        = SSHRunViaEICE
+	sshRunViaEICEStdinFn   = SSHRunViaEICEWithStdin
+	pushSSHPublicKeyFn     = PushSSHPublicKey
+	execInProbeFn          = execInProbe
+	execInProbeWithStdinFn = execInProbeWithStdin
 )
 
-// RunStagingCommands mints+pushes an ephemeral EICE key internally (mirroring
-// StartHTTPResponder), then runs each command in order over SSH-via-EICE,
-// re-pushing the public key before EACH command to survive the ~60s EICE TTL.
-//
-// Returns a per-command stdout slice (one entry per command actually attempted)
-// and the first error encountered (fail-fast: stops on the first failing command).
-// On error, len(out) < len(commands); the partial stdout is returned so the caller
-// can log the remote output of the failing step.
-//
-// RunStagingCommands is a pure leaf — it imports no cli/scenarios/intent/demo/state
-// packages. All embedding and state reads happen in the calling phase.
+// RunStagingCommands mints+pushes an ephemeral SSH key internally, then runs each command in order over SSH.
+// When an in-cluster probe pod is available (and AZRBNKCTL_FORCE_SSH is not 1), it executes commands via execInProbe.
 func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []string) ([]string, error) {
+	if shouldUseProbe(ctx) {
+		out := make([]string, 0, len(commands))
+		for _, cmd := range commands {
+			cleanedCmd := stripInterfaceFlag(cmd)
+			stdout, runErr := execInProbeFn(ctx, cleanedCmd)
+			out = append(out, stdout)
+			if runErr != nil {
+				return out, runErr
+			}
+		}
+		return out, nil
+	}
+
 	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -43,9 +64,6 @@ func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []strin
 
 	out := make([]string, 0, len(commands))
 	for _, cmd := range commands {
-		// Re-push before every command to reset the ~60s EICE TTL.
-		// Mirror RunCurlProbes ~145: errors are intentionally ignored (best-effort
-		// TTL extension; the subsequent SSH call surfaces the real failure).
 		if pubKeyPath != "" {
 			_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
 		}
@@ -53,33 +71,26 @@ func RunStagingCommands(ctx context.Context, opts ProbeOptions, commands []strin
 		stdout, runErr := sshRunViaEICEFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, cmd)
 		out = append(out, stdout)
 		if runErr != nil {
-			// Fail-fast: return stdout-so-far + error so the phase can log the
-			// remote output of the failing step (mirrors StartHTTPResponder ~410).
 			return out, runErr
 		}
 	}
 	return out, nil
 }
 
-// RunStagingCommandWithStdin mints+pushes an ephemeral EICE key (mirroring
-// RunStagingCommands), then runs a SINGLE command over SSH-via-EICE with the
-// local ssh process's stdin attached to the given reader. stdin propagates
-// through ssh → sshd → the remote command (and onward through any nested ssh
-// the remote command runs), so callers can deliver a secret to a remote
-// `cat > file` without the secret ever appearing on any command line (argv) —
-// neither in the operator host's process list nor the jumphost's.
-//
-// Like RunStagingCommands, it is a pure leaf — no cli/scenarios/intent/demo/
-// state imports.
+// RunStagingCommandWithStdin runs a SINGLE command over SSH with stdin attached,
+// or via execInProbeWithStdin when using an in-cluster probe pod.
 func RunStagingCommandWithStdin(ctx context.Context, opts ProbeOptions, command string, stdin io.Reader) (string, error) {
+	if shouldUseProbe(ctx) {
+		cleanedCmd := stripInterfaceFlag(command)
+		return execInProbeWithStdinFn(ctx, cleanedCmd, stdin)
+	}
+
 	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return "", err
 	}
 	defer cleanup()
 
-	// Re-push before the command to reset the ~60s EICE TTL (best-effort, same
-	// rationale as RunStagingCommands).
 	if pubKeyPath != "" {
 		_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
 	}
@@ -87,26 +98,30 @@ func RunStagingCommandWithStdin(ctx context.Context, opts ProbeOptions, command 
 	return sshRunViaEICEStdinFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), keyPath, command, stdin)
 }
 
-// CopyFileViaEICE mints+pushes an ephemeral key, then writes content to remotePath
-// on the jumphost by base64-encoding content and piping it through SSH where it is
-// decoded back to bytes. Overwrites remotePath unconditionally (idempotent re-run =
-// clean overwrite; no skip-if-present needed for small files). Re-pushes the key
-// once before the write (single command, so no per-step loop needed).
-//
-// The base64 mechanism is binary-safe for arbitrary bytes including Python source
-// files — unlike cat-heredoc which breaks on embedded sentinel strings.
-//
-// NOTE: the base64 payload rides on the local ssh process's ARGV, so the
-// content is visible in `ps` on the operator host (and is capped by ARG_MAX).
-// Never use this for secrets (keys, passwords) — use CopyFileViaEICEStdin.
+// CopyFileViaEICE writes content to remotePath on the jumphost or probe pod by base64-encoding content.
 func CopyFileViaEICE(ctx context.Context, opts ProbeOptions, content []byte, remotePath string) error {
+	if shouldUseProbe(ctx) {
+		b64 := base64.StdEncoding.EncodeToString(content)
+		dir := filepath.Dir(remotePath)
+		remoteCmd := fmt.Sprintf(
+			"mkdir -p %s && printf '%%s' %s | base64 -d > %s",
+			shellSingleQuote(dir),
+			shellSingleQuote(b64),
+			shellSingleQuote(remotePath),
+		)
+		_, runErr := execInProbeFn(ctx, remoteCmd)
+		if runErr != nil {
+			return fmt.Errorf("copy %s: %w", remotePath, runErr)
+		}
+		return nil
+	}
+
 	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	// Re-push before the write to reset the EICE TTL.
 	if pubKeyPath != "" {
 		_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
 	}
@@ -114,8 +129,6 @@ func CopyFileViaEICE(ctx context.Context, opts ProbeOptions, content []byte, rem
 	b64 := base64.StdEncoding.EncodeToString(content)
 	dir := filepath.Dir(remotePath)
 
-	// shellSingleQuote on the base64 string is a no-op (no single quotes in base64
-	// alphabet) but documents intent and is defensive per the architect review.
 	remoteCmd := fmt.Sprintf(
 		"mkdir -p %s && printf '%%s' %s | base64 -d > %s",
 		shellSingleQuote(dir),
@@ -130,21 +143,29 @@ func CopyFileViaEICE(ctx context.Context, opts ProbeOptions, content []byte, rem
 	return nil
 }
 
-// CopyFileViaEICEStdin writes content to remotePath on the jumphost by piping
-// the bytes through the SSH channel's STDIN into a remote `cat > file` — the
-// content never appears on any command line (argv), so it is safe for secrets
-// (private keys, credentials), unlike CopyFileViaEICE whose base64 payload is
-// visible in the operator host's process list. Binary-safe for arbitrary bytes
-// and not bounded by ARG_MAX. Overwrites remotePath unconditionally (same
-// idempotent-overwrite contract as CopyFileViaEICE).
+// CopyFileViaEICEStdin writes content to remotePath on the jumphost or probe pod by piping
+// the bytes through stdin into a remote `cat > file`.
 func CopyFileViaEICEStdin(ctx context.Context, opts ProbeOptions, content []byte, remotePath string) error {
+	if shouldUseProbe(ctx) {
+		dir := filepath.Dir(remotePath)
+		remoteCmd := fmt.Sprintf(
+			"mkdir -p %s && cat > %s",
+			shellSingleQuote(dir),
+			shellSingleQuote(remotePath),
+		)
+		_, runErr := execInProbeWithStdinFn(ctx, remoteCmd, bytes.NewReader(content))
+		if runErr != nil {
+			return fmt.Errorf("copy %s: %w", remotePath, runErr)
+		}
+		return nil
+	}
+
 	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	// Re-push before the write to reset the EICE TTL.
 	if pubKeyPath != "" {
 		_ = pushSSHPublicKeyFn(ctx, opts.EffectiveLocation(), opts.EffectiveVMName(), pubKeyPath)
 	}

@@ -42,7 +42,7 @@ const (
 // Phase40Activation polls until BNK TMM is fully active and ready.
 // It verifies both F5TmmAvailable and CNEControllerAvailable conditions on CNEInstance,
 // and polls License CR (bnk-license in f5-cne-core or f5-utils) until status.state == 'Active'.
-// Fails closed with descriptive error and dumps pod diagnostics in f5-bnk and f5-cne-core to os.Stderr.
+// Fails closed with descriptive error and dumps pod diagnostics in f5-cne-system and f5-cne-core to os.Stderr.
 func Phase40Activation(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azure.Clients, dryRun bool) error {
 	fmt.Fprintln(os.Stderr, "[phase 40] activation: verifying BNK TMM activation and readiness")
 
@@ -83,7 +83,7 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 
 	for {
 		// 1. Check CNEInstance conditions (F5TmmAvailable and CNEControllerAvailable)
-		cneObj, err := dyn.Resource(CNEInstanceGVR).Namespace("f5-bnk").Get(ctx, "instance", metav1.GetOptions{})
+		cneObj, err := dyn.Resource(CNEInstanceGVR).Namespace("f5-cne-system").Get(ctx, "instance", metav1.GetOptions{})
 		var tmmAvailable, cneCtrlAvailable bool
 		if err != nil {
 			lastCNEStatus = fmt.Sprintf("getting CNEInstance: %v", err)
@@ -123,13 +123,13 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 		}
 
 		if time.Now().After(deadline) {
-			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-bnk", "f5-cne-core"}, out)
+			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-cne-system", "f5-cne-core"}, out)
 			return fmt.Errorf("phase40: activation timed out waiting for readiness after %s (CNEInstance: %s; License: %s)", timeout, lastCNEStatus, lastLicenseStatus)
 		}
 
 		select {
 		case <-ctx.Done():
-			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-bnk", "f5-cne-core"}, out)
+			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-cne-system", "f5-cne-core"}, out)
 			return fmt.Errorf("phase40: context cancelled waiting for activation: %w", ctx.Err())
 		case <-time.After(pollInterval):
 		}

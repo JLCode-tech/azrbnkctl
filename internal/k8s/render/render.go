@@ -177,7 +177,7 @@ type CNEControllerRBACVars struct {
 // RenderCNEControllerRBAC renders the EndpointSlice + NAD ClusterRole + binding for
 // the cne-controller ServiceAccount.
 func RenderCNEControllerRBAC(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
-	return RenderCNEControllerRBACNamespace(tmpl, cl, "f5-bnk")
+	return RenderCNEControllerRBACNamespace(tmpl, cl, "f5-cne-system")
 }
 
 // RenderCNEControllerRBACNamespace renders the RBAC with an explicit namespace.
@@ -186,7 +186,7 @@ func RenderCNEControllerRBACNamespace(tmpl []byte, cl *intent.Cluster, ns string
 		return nil, fmt.Errorf("render cne-controller rbac: cluster name is required")
 	}
 	if ns == "" {
-		ns = "f5-bnk"
+		ns = "f5-cne-system"
 	}
 	return renderTemplateString(string(tmpl), CNEControllerRBACVars{
 		Name:           CNEControllerRBACName(cl),

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -139,6 +141,19 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 	for _, p := range upPhases {
 		if err := p.fn(ctx, cl, st, clients, dryRun); err != nil {
 			return fmt.Errorf("up: phase %s (%s): %w", p.num, p.name, err)
+		}
+		if !dryRun {
+			now := time.Now().UTC().Format(time.RFC3339)
+			st.Set(fmt.Sprintf("PHASE_%s_APPLIED_AT", strings.ToUpper(p.num)), now)
+			switch p.num {
+			case "35":
+				st.Set("LICENSE_APPLIED_AT", now)
+			case "40":
+				st.Set("CNEINSTANCE_READY_AT", now)
+			}
+			if err := st.Save(); err != nil {
+				return fmt.Errorf("up: saving state after phase %s: %w", p.num, err)
+			}
 		}
 	}
 

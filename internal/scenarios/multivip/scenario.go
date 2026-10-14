@@ -33,6 +33,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -293,7 +294,8 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 
 	instanceID := ctx.State.Get("JUMPHOST_INSTANCE_ID")
 	sourceIP := ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
-	if instanceID == "" || sourceIP == "" {
+	hasProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
+	if !hasProbe && (instanceID == "" || sourceIP == "") {
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
 			Description: "jumphost state keys present",
 			OK:          false,

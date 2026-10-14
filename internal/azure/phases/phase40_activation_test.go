@@ -35,7 +35,7 @@ func fakeCNEInstance(tmmAvailable, ctrlAvailable bool) *unstructured.Unstructure
 			"kind":       "CNEInstance",
 			"metadata": map[string]any{
 				"name":      "instance",
-				"namespace": "f5-bnk",
+				"namespace": "f5-cne-system",
 			},
 			"status": map[string]any{
 				"conditions": []any{
@@ -110,7 +110,7 @@ func fakeKubeClientWithPods() *k8sfake.Clientset {
 	podBNK := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "f5-tmm-0",
-			Namespace: "f5-bnk",
+			Namespace: "f5-cne-system",
 		},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,

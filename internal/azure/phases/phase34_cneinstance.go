@@ -83,8 +83,8 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		}
 	}
 
-	// Apply NetworkAttachmentDefinitions in f5-bnk and default namespaces
-	for _, ns := range []string{"f5-bnk", "default"} {
+	// Apply NetworkAttachmentDefinitions in f5-cne-system and default namespaces
+	for _, ns := range []string{"f5-cne-system", "default"} {
 		nadBytes, err := render.RenderNADs(render.NADsData{
 			Namespace: ns,
 			ExtPCI:    extPCI,

@@ -2,7 +2,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKVlan
 metadata:
   name: external
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   name: external
   category: external
@@ -28,7 +28,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKVlan
 metadata:
   name: internal
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   name: internal
   interfaces:
@@ -51,7 +51,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-ext-gw
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ExtGwIP }}
   prefixLen: 32
@@ -63,7 +63,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-int-gw
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .IntGwIP }}
   prefixLen: 32
@@ -74,7 +74,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-svcs
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ServiceCidrDest }}
   prefixLen: {{ .ServiceCidrPrefix }}
@@ -85,7 +85,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-pods
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .PodCidrDest }}
   prefixLen: {{ .PodCidrPrefix }}
@@ -96,7 +96,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-default-egress
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: 0.0.0.0
   prefixLen: 0
@@ -108,7 +108,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-svcs
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ServiceCidrDest }}
   prefixLen: {{ .ServiceCidrPrefix }}
@@ -119,7 +119,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-pods
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .PodCidrDest }}
   prefixLen: {{ .PodCidrPrefix }}
@@ -130,7 +130,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-default-egress
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: 0.0.0.0
   prefixLen: 0
