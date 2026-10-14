@@ -17,7 +17,7 @@ spec:
   egressConfigs:
   - name: demo-egress
     networkRef:
-      name: ext-vlan-infra
+      name: external
     sourceNATConfig:
       type: Automap
 ---

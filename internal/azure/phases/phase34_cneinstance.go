@@ -34,10 +34,10 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 	}
 
 	var nads []string
-	if extPCI != "" {
+	if extPCI != "" || cl.Pattern == intent.PatternDualInterface || cl.Pattern == intent.PatternExternalOnly || cl.Pattern == intent.PatternHostDevice {
 		nads = append(nads, "tmm-ext")
 	}
-	if intPCI != "" {
+	if intPCI != "" || cl.Pattern == intent.PatternDualInterface {
 		nads = append(nads, "tmm-int")
 	}
 

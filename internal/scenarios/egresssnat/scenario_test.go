@@ -88,7 +88,7 @@ func TestManifestsRendered(t *testing.T) {
 		{"03-gatewaysettings.yaml", "namespace: azrbnkctl-scn-egress", "GatewaySettings in the scenario namespace"},
 		{"03-gatewaysettings.yaml", "- name: default-egress", "egressConfigs entry name"},
 		{"03-gatewaysettings.yaml", "type: Automap", "Automap SNAT"},
-		{"03-gatewaysettings.yaml", "name: ext-vlan", "tunnel network defaults to the external Infra VLAN"},
+		{"03-gatewaysettings.yaml", "name: external", "tunnel network defaults to the external Infra VLAN"},
 		{"04-egressgateway.yaml", "kind: EgressGateway", "EgressGateway kind"},
 
 		{"04-egressgateway.yaml", "gatewayClassName: f5-cne", "GatewayClass fallback"},
@@ -249,8 +249,8 @@ func TestManifestsRendered_WithClusterAndState(t *testing.T) {
 	if !strings.Contains(m["04-egressgateway.yaml"], "gatewayClassName: bnk-live-gatewayclass") {
 		t.Errorf("EgressGateway should bind to the GatewayClass in state:\n%s", m["04-egressgateway.yaml"])
 	}
-	if !strings.Contains(m["03-gatewaysettings.yaml"], "name: int-vlan") {
-		t.Errorf("dual-interface tunnel network should be int-vlan:\n%s", m["03-gatewaysettings.yaml"])
+	if !strings.Contains(m["03-gatewaysettings.yaml"], "name: internal") {
+		t.Errorf("dual-interface tunnel network should be internal:\n%s", m["03-gatewaysettings.yaml"])
 	}
 
 	// Without the state key the class follows the cluster-name convention.

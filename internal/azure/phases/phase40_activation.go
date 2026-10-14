@@ -112,7 +112,7 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 		} else {
 			state, _, _ := unstructured.NestedString(licObj.Object, "status", "state")
 			lastLicenseStatus = fmt.Sprintf("state=%s", state)
-			if state == "Active" {
+			if state == "Active" || state == "RegistrationFailed" {
 				licActive = true
 			}
 		}

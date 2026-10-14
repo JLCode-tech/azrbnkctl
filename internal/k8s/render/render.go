@@ -137,8 +137,8 @@ func RenderNADs(data NADsData) ([]byte, error) {
 
 const (
 	InfraName         = "infra"
-	InfraExtNetwork   = "ext-vlan"
-	InfraIntNetwork   = "int-vlan"
+	InfraExtNetwork   = "external"
+	InfraIntNetwork   = "internal"
 	InfraListenerPool = "listener-pool"
 	InfraEgressSubnet = "192.168.0.0/16"
 	InfraEgressPort   = 4789

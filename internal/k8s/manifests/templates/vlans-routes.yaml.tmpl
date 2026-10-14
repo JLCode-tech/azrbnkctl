@@ -1,13 +1,13 @@
 apiVersion: k8s.f5net.com/v1
 kind: F5SPKVlan
 metadata:
-  name: eth0
+  name: external
   namespace: f5-bnk
 spec:
-  name: eth0
+  name: external
   category: external
   interfaces:
-  - "0.1"
+  - "1.1"
   internal: false
   mtu: {{ .TmmMtu }}
   prefixlen_v4: {{ .ExtPrefixLen }}
@@ -32,7 +32,7 @@ metadata:
 spec:
   name: internal
   interfaces:
-  - "0.1"
+  - "1.2"
   internal: true
   mtu: {{ .TmmMtu }}
   prefixlen_v4: {{ .IntPrefixLen }}
@@ -56,7 +56,7 @@ spec:
   destination: {{ .ExtGwIP }}
   prefixLen: 32
   type: interface
-  interface: eth0
+  interface: external
 {{- if .IntGwIP }}
 ---
 apiVersion: k8s.f5net.com/v1

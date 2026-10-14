@@ -139,7 +139,7 @@ func fakeKubeClientWithPods() *k8sfake.Clientset {
 			},
 		},
 	}
-	return k8sfake.NewSimpleClientset(podBNK, podCNE)
+	return k8sfake.NewClientset(podBNK, podCNE)
 }
 
 func TestPhase40Activation_Success(t *testing.T) {
