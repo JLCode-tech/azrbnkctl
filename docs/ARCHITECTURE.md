@@ -52,6 +52,6 @@ A dedicated Virtual Network is partitioned into four distinct subnets:
 - Go template renderer for `cneinstance.yaml.tmpl`, `license-cr.yaml.tmpl`, `vlans-routes.yaml.tmpl`, `egress.yaml.tmpl`.
 
 ### 4. Phased Lifecycle Engine (`internal/azure/phases`)
-- 21 discrete topological phases executed sequentially.
+- 23 discrete topological phases executed sequentially.
 - State persisted to `.azrbnkctl/<cluster-name>/state.env`.
 - Safe atomic rollback and reverse-order teardown (`down.go`).
