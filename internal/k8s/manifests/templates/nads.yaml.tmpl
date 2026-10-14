@@ -8,8 +8,11 @@ spec:
     {
       "cniVersion": "0.3.1",
       "name": "tmm-ext",
-      "type": "host-device",
-      "pciBusID": "{{ .ExtPCI }}"
+      "type": "dummy",
+      "ipam": {
+        "type": "host-local",
+        "subnet": "10.0.17.0/24"
+      }
     }
 {{- if .IntPCI }}
 ---
@@ -23,7 +26,10 @@ spec:
     {
       "cniVersion": "0.3.1",
       "name": "tmm-int",
-      "type": "host-device",
-      "pciBusID": "{{ .IntPCI }}"
+      "type": "dummy",
+      "ipam": {
+        "type": "host-local",
+        "subnet": "10.0.18.0/24"
+      }
     }
 {{- end }}
