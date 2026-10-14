@@ -714,6 +714,7 @@
     "Synthesises",
     "tcpdump",
     "tcpl",
+    "teardowns",
     "telco",
     "terraform",
     "terraform-exec",

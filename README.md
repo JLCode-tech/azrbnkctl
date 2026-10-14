@@ -1,6 +1,6 @@
 # azrbnkctl
 
-![BNK](https://img.shields.io/badge/BNK-2.3.2-0a3a5c)
+![BNK](https://img.shields.io/badge/BNK-2.4.0-0a3a5c)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-1.32--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![Azure AKS](https://img.shields.io/badge/Azure-AKS-0078d4?logo=microsoftazure&logoColor=white)
 [![CI](https://github.com/JLCode-tech/azrbnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/azrbnkctl/actions/workflows/ci.yml)
@@ -48,11 +48,11 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 ## Highlights
 
-- **Deterministic Phased Provisioner** — 18 ordered, idempotent phases driven directly via the Azure Go ARM SDK (`armcontainerservice`, `armnetwork`, `armresources`). Azure resource tags serve as the single source of truth; local state caches accelerate subsequent runs.
+- **Deterministic Phased Provisioner** — 23 ordered, idempotent phases driven directly via the Azure Go ARM SDK (`armcontainerservice`, `armnetwork`, `armresources`). Azure resource tags serve as the single source of truth; local state caches accelerate subsequent runs.
 - **Embedded Kubernetes Engine (`k`)** — Native `client-go` dynamic Server-Side Apply (SSA) engine providing `get`, `apply`, `describe`, `delete`, `logs`, `exec`, and `port-forward` with zero host `kubectl` dependencies.
 - **Automated Node Preparation** — Automatic HugePages allocation (4Gi 2MB HugePages), kernel core dump configuration, and kubelet capacity advertisement.
 - **Native Azure Hardware Discovery** — Dynamic discovery of Azure Accelerated Networking SR-IOV virtual functions (`4567:00:02.0`), Subnet Gateways, and Self IPs.
-- **Agentic Workflow Built-In** — First-class AI pair-programming support with `azrbnkctl agent [claude, gemini, chatgpt, ...]`, append-only operational journaling (`azrbnkctl journal`), and embedded Model Context Protocol (MCP) server.
+- **Agentic Workflow Built-In** — First-class AI pair-programming support with `azrbnkctl agent [gemini, claude, opencode, cursor]`, append-only operational journaling (`azrbnkctl journal`), and BNK Forge MCP integration.
 - **BNK Forge Integration** — Instant one-line cluster registration, project management, and real-time data plane topology visualization with `azrbnkctl forge register`.
 - **Cross-Platform Single Binary** — Statically compiled for Linux (amd64, arm64), macOS (Apple Silicon arm64, Intel amd64), and Windows.
 
@@ -62,12 +62,12 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 | Component | Pinned Version / Range | Notes |
 |---|---|---|
-| **BNK** | `2.3.2` / `2.4.0` | Primary supported release |
-| **CNE Release Manifest** | `2.3.0-3.2598.3-0.0.170` | Resolved dynamically from FAR registry |
+| **BNK** | `2.4.0` (also supports `2.3.x`) | Primary supported release |
+| **CNE Release Manifest** | `2.4.0` (Default) | Resolved dynamically from FAR registry |
 | **Kubernetes (AKS)** | `1.32` – `1.35` (Default: `1.34.10`) | Preflight gate rejects < 1.32 |
 | **Azure Go SDK** | `v6` (`armcontainerservice/v6`, `armnetwork/v6`) | Direct Azure Resource Manager API communication |
 | **cert-manager** | `v1.16.1` | Managed via embedded SSA installer |
-| **FLO Helm / CRDs** | `v2.21+` | Resolved and reconciled dynamically |
+| **FLO Helm / CRDs** | `v2.30+` / `v2.21+` | Resolved and reconciled dynamically |
 
 ---
 
@@ -156,8 +156,13 @@ azrbnkctl forge status -f cluster.yaml
 
 ### 5. Teardown
 ```bash
+# Teardown AKS cluster and managed resources (Resource Group is preserved by default)
 azrbnkctl down -f cluster.yaml
+
+# To also delete the Resource Group (e.g. clean dev teardowns)
+azrbnkctl down -f cluster.yaml --delete-rg
 ```
+
 
 ---
 
@@ -184,11 +189,12 @@ azrbnkctl agent gemini
 azrbnkctl agent claude
 
 # Operational Journaling
-azrbnkctl journal log "Provisioned TMM node pool and configured HugePages"
-azrbnkctl journal show
+azrbnkctl journal add "Provisioned TMM node pool and configured HugePages"
+azrbnkctl journal list
 
-# Start MCP Server for IDEs and LLM tool orchestration
-azrbnkctl mcp --port 8081
+# BNK Forge MCP Integration (http://localhost:8081/mcp/)
+azrbnkctl forge register -f cluster.yaml
+azrbnkctl forge status -f cluster.yaml
 ```
 
 ---
@@ -200,7 +206,7 @@ azrbnkctl/
 ├── .github/                 # GitHub Actions CI/CD workflows and Dependabot
 ├── cmd/                     # CLI entrypoint (azrbnkctl)
 ├── internal/
-│   ├── azure/               # Azure ARM SDK clients and 18 lifecycle phases
+│   ├── azure/               # Azure ARM SDK clients and 23 lifecycle phases
 │   ├── bnkforge/            # BNK Forge client & registration logic
 │   ├── cli/                 # Cobra CLI commands (up, down, validate, test, etc.)
 │   ├── doctor/              # Azure subscription preflight checks

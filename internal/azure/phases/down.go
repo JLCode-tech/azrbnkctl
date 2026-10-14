@@ -98,16 +98,17 @@ func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, st *state.State,
 	return nil
 }
 
-// PhaseDownResourceGroup deletes the Resource Group if managed and not kept.
-func PhaseDownResourceGroup(ctx context.Context, cl *intent.Cluster, st *state.State, clients *azure.Clients, keepRG, dryRun bool) error {
+// PhaseDownResourceGroup deletes the Resource Group only if deleteRG is explicitly true.
+// By default, the Resource Group is preserved to avoid accidental destruction of shared scopes.
+func PhaseDownResourceGroup(ctx context.Context, cl *intent.Cluster, st *state.State, clients *azure.Clients, deleteRG, dryRun bool) error {
 	rgName := cl.Derived.ResourceGroupName
 
-	if keepRG {
-		fmt.Fprintf(os.Stderr, "[down] resource-group: keeping %s (--keep-rg specified)\n", rgName)
+	if !deleteRG {
+		fmt.Fprintf(os.Stderr, "[down] resource-group: keeping %s (Resource Group is preserved by default; pass --delete-rg to delete)\n", rgName)
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "[down] resource-group: deleting %s\n", rgName)
+	fmt.Fprintf(os.Stderr, "[down] resource-group: deleting %s (--delete-rg specified)\n", rgName)
 
 	if dryRun {
 		fmt.Fprintf(os.Stderr, "[down] [dry-run] would delete Resource Group %s\n", rgName)

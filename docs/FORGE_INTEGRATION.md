@@ -18,7 +18,7 @@ azrbnkctl forge register -f cluster.yaml
 - **Project Discovery**: Automatically detects or creates the project container in Forge.
 - **Cluster Linking**: Registers the AKS API server endpoint, CA certificate, and token credentials.
 - **Agent Token Generation**: Automatically injects the `bnk-forge-agent` into the `f5-utils` namespace on the AKS cluster.
-- **Link Persistence**: Stores project and cluster IDs in `.azrbnkctl/<cluster>/forge-link.json`.
+- **Link Persistence**: Stores project and cluster IDs in `.azrbnkctl/<cluster>/forge_link.json`.
 
 ## 3. Viewing Cluster Status in Forge
 

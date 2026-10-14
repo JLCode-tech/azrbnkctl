@@ -186,6 +186,9 @@ bnk:
 		t.Fatalf("PhaseDownNetworks failed: %v", err)
 	}
 	if err := PhaseDownResourceGroup(ctx, cl, st, clients, false, dryRun); err != nil {
-		t.Fatalf("PhaseDownResourceGroup failed: %v", err)
+		t.Fatalf("PhaseDownResourceGroup (keep default) failed: %v", err)
+	}
+	if err := PhaseDownResourceGroup(ctx, cl, st, clients, true, dryRun); err != nil {
+		t.Fatalf("PhaseDownResourceGroup (deleteRG=true) failed: %v", err)
 	}
 }

@@ -71,4 +71,5 @@ Resource teardown runs in strict reverse dependency order to avoid cloud locking
 1. **AKS Managed Cluster**: Delete AKS cluster and worker node pools.
 2. **NAT Gateway & Public IPs**: Release NAT Gateway and associated public IP addresses.
 3. **Virtual Networks & NSG**: Delete VNet, subnets, and Network Security Group.
-4. **Resource Group**: Delete Resource Group (unless `--keep-rg` is specified).
+4. **Resource Group**: Preserve Resource Group by default to protect shared RBAC and policy scopes. Deleted only if `--delete-rg` is explicitly specified.
+

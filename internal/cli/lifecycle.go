@@ -22,6 +22,7 @@ var (
 	flagDownDryRun bool
 	flagYes        bool
 	flagKeepRG     bool
+	flagDeleteRG   bool
 )
 
 var upCmd = &cobra.Command{
@@ -41,9 +42,11 @@ var downCmd = &cobra.Command{
 	Use:   "down",
 	Short: "Destroy the AKS cluster and managed resources (requires -f <cluster.yaml>)",
 	Long: `azrbnkctl down deletes the AKS cluster, NAT Gateway, Public IPs,
-VNet, Subnets, NSG, and Resource Group in reverse dependency order.
+VNet, Subnets, and NSG in reverse dependency order.
+The Azure Resource Group is preserved by default to safeguard shared scopes and RBAC.
+To also delete the Resource Group, pass --delete-rg.
 
-  azrbnkctl down -f cluster.yaml [--yes] [--keep-rg] [--dry-run]`,
+  azrbnkctl down -f cluster.yaml [--yes] [--delete-rg] [--dry-run]`,
 	RunE: runDown,
 }
 
@@ -54,7 +57,8 @@ func init() {
 	downCmd.Flags().StringVarP(&flagConfig, "config", "f", "", "path to cluster.yaml (required)")
 	downCmd.Flags().BoolVar(&flagDownDryRun, "dry-run", false, "print the destroy plan and exit 0 with no Azure mutations")
 	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation")
-	downCmd.Flags().BoolVar(&flagKeepRG, "keep-rg", false, "keep the Azure Resource Group and only delete managed resources inside it")
+	downCmd.Flags().BoolVar(&flagDeleteRG, "delete-rg", false, "also delete the Azure Resource Group (CAUTION: destroys the entire Resource Group; defaults to false)")
+	downCmd.Flags().BoolVar(&flagKeepRG, "keep-rg", false, "keep the Azure Resource Group (default behavior, preserved for backward compatibility)")
 
 	rootCmd.AddCommand(upCmd, downCmd)
 }
@@ -70,7 +74,10 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	if flagConfig == "" {
 		return errors.New("azrbnkctl down requires -f <cluster.yaml>")
 	}
-	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagKeepRG, flagDownDryRun)
+	if flagDeleteRG && flagKeepRG {
+		return errors.New("cannot specify both --delete-rg and --keep-rg")
+	}
+	return runPhasedDown(cmd.Context(), flagConfig, flagYes, flagDeleteRG, flagDownDryRun)
 }
 
 type upPhase struct {
@@ -162,8 +169,12 @@ func buildAzureClients(ctx context.Context, cl *intent.Cluster, dryRun bool) (*a
 	return azure.NewClientsWithDefault(subID)
 }
 
-func confirmDestroy(in io.Reader, out io.Writer, name, rg, subID string) bool {
-	fmt.Fprintf(out, "About to DESTROY cluster %q (rg=%s subscription=%s) and all managed resources.\n", name, rg, subID)
+func confirmDestroy(in io.Reader, out io.Writer, name, rg, subID string, deleteRG bool) bool {
+	if deleteRG {
+		fmt.Fprintf(out, "WARNING: About to DESTROY cluster %q and DELETE RESOURCE GROUP %q (subscription=%s)!\n", name, rg, subID)
+	} else {
+		fmt.Fprintf(out, "About to DESTROY cluster %q (rg=%s [preserved], subscription=%s) and managed resources.\n", name, rg, subID)
+	}
 	fmt.Fprintln(out, "Type 'destroy' to proceed:")
 	scanner := bufio.NewScanner(in)
 	if !scanner.Scan() || scanner.Text() != "destroy" {
@@ -173,7 +184,7 @@ func confirmDestroy(in io.Reader, out io.Writer, name, rg, subID string) bool {
 	return true
 }
 
-func runPhasedDown(ctx context.Context, configPath string, yes, keepRG, dryRun bool) error {
+func runPhasedDown(ctx context.Context, configPath string, yes, deleteRG, dryRun bool) error {
 	cl, err := intent.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("down: %w", err)
@@ -185,11 +196,11 @@ func runPhasedDown(ctx context.Context, configPath string, yes, keepRG, dryRun b
 	}
 
 	if dryRun {
-		printDownPlan(os.Stderr, cl, keepRG)
+		printDownPlan(os.Stderr, cl, deleteRG)
 		return nil
 	}
 
-	if !yes && !confirmDestroy(os.Stdin, os.Stderr, cl.Metadata.Name, cl.Derived.ResourceGroupName, cl.Metadata.SubscriptionID) {
+	if !yes && !confirmDestroy(os.Stdin, os.Stderr, cl.Metadata.Name, cl.Derived.ResourceGroupName, cl.Metadata.SubscriptionID, deleteRG) {
 		return nil
 	}
 
@@ -210,7 +221,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, keepRG, dryRun b
 	if err := phases.PhaseDownNetworks(ctx, cl, st, clients, dryRun); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
-	if err := phases.PhaseDownResourceGroup(ctx, cl, st, clients, keepRG, dryRun); err != nil {
+	if err := phases.PhaseDownResourceGroup(ctx, cl, st, clients, deleteRG, dryRun); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
 
@@ -221,7 +232,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes, keepRG, dryRun b
 	return nil
 }
 
-func printDownPlan(w io.Writer, cl *intent.Cluster, keepRG bool) {
+func printDownPlan(w io.Writer, cl *intent.Cluster, deleteRG bool) {
 	fmt.Fprintf(w, "→ dry-run: destroy plan for cluster %q (rg=%s subscription=%s) — no Azure mutations\n",
 		cl.Metadata.Name, cl.Derived.ResourceGroupName, cl.Metadata.SubscriptionID)
 
@@ -235,14 +246,14 @@ func printDownPlan(w io.Writer, cl *intent.Cluster, keepRG bool) {
 	plan = append(plan, fmt.Sprintf("  • delete  Ingress Public IP          %s", cl.Derived.PublicIPName))
 	plan = append(plan, fmt.Sprintf("  • delete  VNet & Subnets             %s", cl.Derived.VNetName))
 	plan = append(plan, fmt.Sprintf("  • delete  NSG                        %s", cl.Derived.NSGName))
-	if !keepRG {
-		plan = append(plan, fmt.Sprintf("  • delete  Resource Group             %s", cl.Derived.ResourceGroupName))
+	if deleteRG {
+		plan = append(plan, fmt.Sprintf("  • delete  Resource Group             %s (--delete-rg)", cl.Derived.ResourceGroupName))
 	} else {
-		plan = append(plan, fmt.Sprintf("  • keep    Resource Group             %s (--keep-rg)", cl.Derived.ResourceGroupName))
+		plan = append(plan, fmt.Sprintf("  • keep    Resource Group             %s (default: preserved)", cl.Derived.ResourceGroupName))
 	}
 
 	for _, line := range plan {
 		fmt.Fprintln(w, line)
 	}
-	fmt.Fprintf(w, "→ dry-run complete: %d resource(s) would be destroyed, 0 Azure mutations made\n", len(plan))
+	fmt.Fprintf(w, "→ dry-run complete: %d resource(s) planned, 0 Azure mutations made\n", len(plan))
 }
