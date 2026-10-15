@@ -32,7 +32,7 @@ cluster:
     acceleratedNetworking: true
 
 bnk:
-  manifestVersion: "2.4.0-3.2882.0"
+  manifestVersion: "2.4.0"
   deploymentSize: "small"
   tmmCpu: "4"
   tmmMemory: "8Gi"

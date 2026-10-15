@@ -3,6 +3,9 @@ package render
 import (
 	"strings"
 	"testing"
+
+	"github.com/JLCode-tech/azrbnkctl/internal/intent"
+	"github.com/JLCode-tech/azrbnkctl/internal/k8s/manifests"
 )
 
 func TestRenderCNEInstance(t *testing.T) {
@@ -130,5 +133,103 @@ func TestRenderVlansRoutes(t *testing.T) {
 	}
 	if !strings.Contains(str, "name: route-cluster-pods") || !strings.Contains(str, "destination: 10.244.0.0") {
 		t.Errorf("expected route-cluster-pods in output, got:\n%s", str)
+	}
+}
+
+func TestRenderInfra(t *testing.T) {
+	data := InfraData{
+		TmmMtu:        1500,
+		ExtSelfIP:     "10.0.17.10",
+		ExtGwIP:       "10.0.17.1",
+		IntSelfIP:     "10.0.18.10",
+		IntGwIP:       "10.0.18.1",
+		ListenerStart: "10.0.17.100",
+		ListenerEnd:   "10.0.17.199",
+	}
+
+	out, err := RenderInfra(data)
+	if err != nil {
+		t.Fatalf("RenderInfra failed: %v", err)
+	}
+
+	str := string(out)
+	for _, want := range []string{
+		"kind: Infra",
+		"name: infra",
+		"namespace: f5-cne-system",
+		"name: external-selfip",
+		"name: internal-selfip",
+		"name: listener-pool",
+		`rangeStart: "10.0.17.100"`,
+		`rangeEnd: "10.0.17.199"`,
+		"name: tmm-ext",
+		"name: tmm-int",
+		"egressDefaults:",
+		"subnet: 192.168.0.0/16",
+		"name: route-cluster-pods",
+		"name: route-cluster-svcs",
+		"name: route-default-egress",
+		"nextHop: 10.0.18.1",
+	} {
+		if !strings.Contains(str, want) {
+			t.Errorf("expected %q in RenderInfra output, got:\n%s", want, str)
+		}
+	}
+}
+
+func TestRenderEgressAndEgressGateway(t *testing.T) {
+	legacy, err := RenderEgress("bnk-demo")
+	if err != nil {
+		t.Fatalf("RenderEgress failed: %v", err)
+	}
+	if !strings.Contains(string(legacy), "kind: F5SPKEgress") || !strings.Contains(string(legacy), "- bnk-demo") {
+		t.Errorf("unexpected legacy RenderEgress output:\n%s", string(legacy))
+	}
+
+	v24, err := RenderEgressGateway(EgressData{
+		Namespace:        "bnk-demo",
+		GatewayClassName: "test-aks-gatewayclass",
+		NetworkRef:       "internal",
+	})
+	if err != nil {
+		t.Fatalf("RenderEgressGateway failed: %v", err)
+	}
+	s24 := string(v24)
+	for _, want := range []string{
+		"kind: GatewaySettings",
+		"kind: EgressGateway",
+		"name: default-egress",
+		"namespace: bnk-demo",
+		"gatewayClassName: test-aks-gatewayclass",
+		"name: internal",
+	} {
+		if !strings.Contains(s24, want) {
+			t.Errorf("expected %q in RenderEgressGateway output, got:\n%s", want, s24)
+		}
+	}
+}
+
+func TestRenderCNEControllerRBAC(t *testing.T) {
+	tmpl, err := manifests.FS.ReadFile("shared/cne-controller-rbac.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read shared/cne-controller-rbac.yaml.tmpl: %v", err)
+	}
+	cl := &intent.Cluster{Metadata: intent.Metadata{Name: "test-aks"}}
+	out, err := RenderCNEControllerRBAC(tmpl, cl)
+	if err != nil {
+		t.Fatalf("RenderCNEControllerRBAC failed: %v", err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		`"gateway.k8s.f5.com", "k8s.f5.com"`,
+		"name: f5-cne-controller",
+		"namespace: f5-cne-system",
+		"name: cwc",
+		"namespace: f5-utils",
+		"namespace: f5-cne-core",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %q in RenderCNEControllerRBAC output, got:\n%s", want, s)
+		}
 	}
 }

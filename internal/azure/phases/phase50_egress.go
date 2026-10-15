@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/azure"
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
@@ -12,7 +13,7 @@ import (
 	"github.com/JLCode-tech/azrbnkctl/internal/k8s/render"
 )
 
-// Phase50Egress renders and applies F5SPKEgress CRs for default egress routing.
+// Phase50Egress renders and applies BNK 2.4 GatewaySettings + EgressGateway (or legacy BNK 2.3 F5SPKEgress) CRs for default egress routing.
 func Phase50Egress(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azure.Clients, dryRun bool) error {
 	if cl.Pattern != intent.PatternDualInterface {
 		fmt.Fprintln(os.Stderr, "[phase 50] egress: pattern is not dual-interface — skipping")
@@ -21,7 +22,27 @@ func Phase50Egress(ctx context.Context, cl *intent.Cluster, st *state.State, _ *
 
 	fmt.Fprintln(os.Stderr, "[phase 50] egress: configuring default egress routing")
 
-	rendered, err := render.RenderEgress("egress-demo")
+	egressNS := cl.Egress.Namespace
+	if egressNS == "" {
+		egressNS = "bnk-demo"
+	}
+
+	var rendered []byte
+	var err error
+	if strings.HasPrefix(cl.Bnk.ManifestVersion, "2.3") {
+		rendered, err = render.RenderEgress(egressNS)
+	} else {
+		gwcName := cl.Metadata.Name + "-gatewayclass"
+		if cl.Metadata.Name == "" {
+			gwcName = "f5-cne-gateway-class"
+		}
+		networkRef := render.InfraTunnelNetwork(cl.HasInternalInterface())
+		rendered, err = render.RenderEgressGateway(render.EgressData{
+			Namespace:        egressNS,
+			GatewayClassName: gwcName,
+			NetworkRef:       networkRef,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("phase50: rendering egress CR: %w", err)
 	}

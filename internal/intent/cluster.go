@@ -388,7 +388,7 @@ func (c *Cluster) setDefaults() {
 	}
 
 	if c.Egress.Enabled && c.Egress.Namespace == "" {
-		c.Egress.Namespace = "egress-demo"
+		c.Egress.Namespace = "bnk-demo"
 	}
 	if c.Egress.Enabled && c.Egress.Port == 0 {
 		c.Egress.Port = 4789

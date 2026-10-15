@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"k8s.io/client-go/dynamic"
@@ -16,7 +17,7 @@ import (
 	"github.com/JLCode-tech/azrbnkctl/internal/netcalc"
 )
 
-// Phase37VlansRoutes renders and applies F5SPKVlan and F5SPKStaticRoute CRs.
+// Phase37VlansRoutes renders and applies the BNK 2.4 Infra CR (or legacy BNK 2.3 F5SPKVlan/F5SPKStaticRoute CRs).
 func Phase37VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azure.Clients, dryRun bool) error {
 	fmt.Fprintln(os.Stderr, "[phase 37] vlans-routes: configuring dataplane VLANs and static routes")
 
@@ -34,19 +35,43 @@ func Phase37VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 		intGwIP = st.Get("AZURE_INT_GW_IP")
 	}
 
-	data := render.VlansRoutesData{
-		TmmMtu:       cl.Bnk.TmmMtu,
-		ExtPrefixLen: extPrefixLen,
-		ExtSelfIP:    extSelfIP,
-		ExtGwIP:      extGwIP,
-		IntPrefixLen: intPrefixLen,
-		IntSelfIP:    intSelfIP,
-		IntGwIP:      intGwIP,
-	}
+	isLegacy23 := cl != nil && strings.HasPrefix(cl.Bnk.ManifestVersion, "2.3")
 
-	rendered, err := render.RenderVlansRoutes(data)
-	if err != nil {
-		return fmt.Errorf("phase37: rendering vlans and routes: %w", err)
+	var rendered []byte
+	var err error
+	crdName := "infras.gateway.k8s.f5.com"
+
+	if isLegacy23 {
+		crdName = "f5-spk-vlans.k8s.f5net.com"
+		data := render.VlansRoutesData{
+			TmmMtu:       cl.Bnk.TmmMtu,
+			ExtPrefixLen: extPrefixLen,
+			ExtSelfIP:    extSelfIP,
+			ExtGwIP:      extGwIP,
+			IntPrefixLen: intPrefixLen,
+			IntSelfIP:    intSelfIP,
+			IntGwIP:      intGwIP,
+		}
+		rendered, err = render.RenderVlansRoutes(data)
+		if err != nil {
+			return fmt.Errorf("phase37: rendering vlans and routes: %w", err)
+		}
+	} else {
+		listenerStart, _ := netcalc.Nth(cl.Network.Subnets.External, 100)
+		listenerEnd, _ := netcalc.Nth(cl.Network.Subnets.External, 199)
+		data := render.InfraData{
+			TmmMtu:        cl.Bnk.TmmMtu,
+			ExtSelfIP:     extSelfIP,
+			ExtGwIP:       extGwIP,
+			IntSelfIP:     intSelfIP,
+			IntGwIP:       intGwIP,
+			ListenerStart: listenerStart,
+			ListenerEnd:   listenerEnd,
+		}
+		rendered, err = render.RenderInfra(data)
+		if err != nil {
+			return fmt.Errorf("phase37: rendering Infra CR: %w", err)
+		}
 	}
 
 	if dryRun {
@@ -64,10 +89,10 @@ func Phase37VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 		return fmt.Errorf("phase37: dynamic client: %w", err)
 	}
 
-	if err := k8s.WaitForCRDEstablished(ctx, dyn, "f5-spk-vlans.k8s.f5net.com", 5*time.Minute); err != nil {
-		return fmt.Errorf("phase37: waiting for f5-spk-vlans.k8s.f5net.com CRD: %w", err)
+	if err := k8s.WaitForCRDEstablished(ctx, dyn, crdName, 5*time.Minute); err != nil {
+		return fmt.Errorf("phase37: waiting for %s CRD: %w", crdName, err)
 	}
-	fmt.Fprintln(os.Stderr, "[phase 37] f5-spk-vlans.k8s.f5net.com CRD established")
+	fmt.Fprintf(os.Stderr, "[phase 37] %s CRD established\n", crdName)
 
 	applier, err := k8s.NewApplier(cfg)
 	if err != nil {

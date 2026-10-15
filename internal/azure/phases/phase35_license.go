@@ -88,15 +88,57 @@ func Phase35License(ctx context.Context, cl *intent.Cluster, st *state.State, _ 
 	return nil
 }
 
-// purgeStaleCPCLSecrets deletes any stale licensestatus or cpcl-config-secret
-// secrets in f5-utils and f5-cne-core before applying the License CR so CPCL
-// does not get stuck in a stale state across re-runs.
+// purgeStaleCPCLSecrets syncs Secret/cpcl-key-secret from ConfigMap/cpcl-key-cm
+// and deletes stale CPCL/CWC state secrets in f5-utils, f5-cne-core, and f5-bnk
+// before applying the License CR so CPCL does not get stuck in a stale state across re-runs.
 func purgeStaleCPCLSecrets(ctx context.Context, client kubernetes.Interface) {
 	if client == nil {
 		return
 	}
+
+	var fallbackJWTKey string
+	if cm, err := client.CoreV1().ConfigMaps("f5-utils").Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil {
+		fallbackJWTKey = cm.Data["jwt.key"]
+	}
+
 	for _, ns := range []string{"f5-utils", "f5-cne-core"} {
-		for _, secretName := range []string{"licensestatus", "cpcl-config-secret"} {
+		jwtKey := fallbackJWTKey
+		if cm, err := client.CoreV1().ConfigMaps(ns).Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil && cm.Data["jwt.key"] != "" {
+			jwtKey = cm.Data["jwt.key"]
+		}
+		if jwtKey == "" {
+			continue
+		}
+		sec, err := client.CoreV1().Secrets(ns).Get(ctx, "cpcl-key-secret", metav1.GetOptions{})
+		if err != nil || sec == nil {
+			continue
+		}
+		if sec.Data == nil {
+			sec.Data = make(map[string][]byte)
+		}
+		sec.Data["jwt.key"] = []byte(jwtKey)
+		if _, updErr := client.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{}); updErr == nil {
+			fmt.Fprintf(os.Stderr, "[phase 35] synced cpcl-key-secret from cpcl-key-cm in %s\n", ns)
+		}
+	}
+
+	staleSecrets := []string{
+		"context",
+		"initialregistrationstatus",
+		"licensestatus",
+		"activationmessage",
+		"activationstatus",
+		"statehistory",
+		"switchlicensestatus",
+		"telemetrystatus",
+		"telemetryreports",
+		"f5-Flo-lic-msg",
+		"f5-cwc-state",
+		"cpcl-Dynamic-state",
+		"cpcl-config-secret",
+	}
+	for _, ns := range []string{"f5-utils", "f5-cne-core", "f5-bnk"} {
+		for _, secretName := range staleSecrets {
 			err := client.CoreV1().Secrets(ns).Delete(ctx, secretName, metav1.DeleteOptions{})
 			if err != nil && !apierrors.IsNotFound(err) {
 				continue

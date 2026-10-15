@@ -211,4 +211,13 @@ bnk:
 	if err := PhaseDownResourceGroup(ctx, cl, st, clients, true, dryRun); err != nil {
 		t.Fatalf("PhaseDownResourceGroup (deleteRG=true) failed: %v", err)
 	}
+
+	// Also verify BNK 2.4 path for Phase 37 and Phase 50
+	cl.Bnk.ManifestVersion = "2.4.0"
+	if err := Phase37VlansRoutes(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase37 (BNK 2.4) failed: %v", err)
+	}
+	if err := Phase50Egress(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase50 (BNK 2.4) failed: %v", err)
+	}
 }

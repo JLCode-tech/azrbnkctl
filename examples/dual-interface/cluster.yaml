@@ -25,7 +25,7 @@ cluster:
     count: 1
     acceleratedNetworking: true
 bnk:
-  manifestVersion: "2.4.0-3.2882.0"
+  manifestVersion: "2.4.0"
   deploymentSize: "small"
   tmmCpu: "2"
   tmmMemory: "4Gi"
@@ -34,7 +34,7 @@ bnk:
   jwt: "./keys/license.jwt"
 egress:
   enabled: true
-  namespace: "egress-demo"
+  namespace: "bnk-demo"
   port: 4789
 tags:
   Environment: "PoC"
