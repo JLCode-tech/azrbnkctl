@@ -102,6 +102,17 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		}
 	}
 
+	// Apply supplemental RBAC for cne-controller and cwc (EndpointSlices, NADs, gateway.k8s.f5.com, k8s.f5.com)
+	if rbacTmpl, err := manifests.FS.ReadFile(CNEControllerRBACYAMLPath); err == nil {
+		if rbacBytes, err := render.RenderCNEControllerRBAC(rbacTmpl, cl); err == nil {
+			if rbacObjs, err := k8s.ParseYAMLStream(rbacBytes); err == nil {
+				if err := applier.ApplyAll(ctx, rbacObjs, true); err != nil {
+					return fmt.Errorf("phase34: applying cne-controller RBAC: %w", err)
+				}
+			}
+		}
+	}
+
 	objs, err := k8s.ParseYAMLStream(rendered)
 	if err != nil {
 		return fmt.Errorf("phase34: parsing rendered CNEInstance: %w", err)

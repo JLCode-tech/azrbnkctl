@@ -26,5 +26,10 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: bnk-demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: egress-demo
 

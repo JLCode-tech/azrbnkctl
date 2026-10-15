@@ -157,14 +157,37 @@ func stripStuckFinalizers(ctx context.Context, kubeconfigPath string) {
 		return
 	}
 
-	gvrs := []schema.GroupVersionResource{
-		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-vlans"},
-		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-staticroutes"},
-		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-egresses"},
-		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-snatpools"},
-		{Group: "k8s.f5.com", Version: "v1", Resource: "cneinstances"},
+	crds := []string{
+		"f5-spk-vlans.k8s.f5net.com",
+		"f5-spk-staticroutes.k8s.f5net.com",
+		"f5-spk-egresses.k8s.f5net.com",
+		"f5-spk-snatpools.k8s.f5net.com",
+		"infras.gateway.k8s.f5.com",
+		"gatewaysettings.gateway.k8s.f5.com",
+		"egressgateways.gateway.k8s.f5.com",
+		"analyzers.k8s.f5.com",
+		"cnecontrollers.k8s.f5.com",
+		"cneinstances.k8s.f5.com",
+		"dssms.k8s.f5.com",
+		"f5tmms.k8s.f5.com",
+		"coremonds.k8s.f5.com",
+		"crdconversions.k8s.f5.com",
+		"crdinstallers.k8s.f5.com",
+		"csrcs.k8s.f5.com",
+		"cwcs.k8s.f5.com",
+		"ipamcontrollers.k8s.f5.com",
+		"rabbitmqs.k8s.f5.com",
 	}
-	namespaces := []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance"}
+	gvrs := crdsToGVRs(crds)
+	namespaces := []string{
+		"f5-cne-core",
+		"f5-cne-system",
+		"f5-bnk-instance",
+		"f5-utils",
+		"f5-bnk",
+		"bnk-demo",
+		"egress-demo",
+	}
 
 	for _, ns := range namespaces {
 		for _, gvr := range gvrs {
@@ -184,4 +207,30 @@ func stripStuckFinalizers(ctx context.Context, kubeconfigPath string) {
 			}
 		}
 	}
+}
+
+func crdsToGVRs(crds []string) []schema.GroupVersionResource {
+	var gvrs []schema.GroupVersionResource
+	for _, crd := range crds {
+		var resource, group string
+		for i := 0; i < len(crd); i++ {
+			if crd[i] == '.' {
+				resource = crd[:i]
+				group = crd[i+1:]
+				break
+			}
+		}
+		if resource == "" || group == "" {
+			continue
+		}
+		version := "v1"
+		if group == "gateway.k8s.f5.com" {
+			version = "v1alpha1"
+		}
+		gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: version, Resource: resource})
+		if resource == "f5-spk-egresses" {
+			gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: "v3", Resource: resource})
+		}
+	}
+	return gvrs
 }

@@ -36,7 +36,7 @@ cluster:
 # Supply-chain credentials: place your F5 FAR auth key archive and subscription JWT
 # inside the keys/ directory relative to this file before running `azrbnkctl up`.
 bnk:
-  manifestVersion: "2.4.0-3.2882.0"
+  manifestVersion: "2.4.0"
   deploymentSize: "small"
   tmmCpu: "4"
   tmmMemory: "8Gi"

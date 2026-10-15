@@ -43,9 +43,26 @@ type VlansRoutesData struct {
 	PodCidrPrefix     int
 }
 
+// InfraData holds parameters for rendering infra.yaml.tmpl (BNK 2.4).
+type InfraData struct {
+	TmmMtu            int
+	ExtSelfIP         string
+	ExtGwIP           string
+	IntSelfIP         string
+	IntGwIP           string
+	ListenerStart     string
+	ListenerEnd       string
+	ServiceCidrDest   string
+	ServiceCidrPrefix int
+	PodCidrDest       string
+	PodCidrPrefix     int
+}
+
 // EgressData holds parameters for rendering egress.yaml.tmpl.
 type EgressData struct {
-	Namespace string
+	Namespace        string
+	GatewayClassName string
+	NetworkRef       string
 }
 
 // LicenseData holds parameters for rendering license-cr.yaml.tmpl.
@@ -125,9 +142,49 @@ func RenderVlansRoutes(data VlansRoutesData) ([]byte, error) {
 	return renderTemplate("templates/vlans-routes.yaml.tmpl", data)
 }
 
-// RenderEgress renders the F5SPKEgress custom resource.
+// RenderInfra renders the BNK 2.4 Infra custom resource.
+func RenderInfra(data InfraData) ([]byte, error) {
+	if data.TmmMtu == 0 {
+		data.TmmMtu = 1500
+	}
+	if data.ServiceCidrDest == "" {
+		data.ServiceCidrDest = "10.240.0.0"
+	}
+	if data.ServiceCidrPrefix == 0 {
+		data.ServiceCidrPrefix = 16
+	}
+	if data.PodCidrDest == "" {
+		data.PodCidrDest = "10.244.0.0"
+	}
+	if data.PodCidrPrefix == 0 {
+		data.PodCidrPrefix = 16
+	}
+	if data.ListenerStart == "" {
+		data.ListenerStart = "10.0.17.100"
+	}
+	if data.ListenerEnd == "" {
+		data.ListenerEnd = "10.0.17.199"
+	}
+	return renderTemplate("templates/infra.yaml.tmpl", data)
+}
+
+// RenderEgress renders the legacy BNK 2.3 F5SPKEgress custom resource.
 func RenderEgress(namespace string) ([]byte, error) {
 	return renderTemplate("templates/egress.yaml.tmpl", EgressData{Namespace: namespace})
+}
+
+// RenderEgressGateway renders the BNK 2.4 GatewaySettings and EgressGateway custom resources.
+func RenderEgressGateway(data EgressData) ([]byte, error) {
+	if data.Namespace == "" {
+		data.Namespace = "bnk-demo"
+	}
+	if data.GatewayClassName == "" {
+		data.GatewayClassName = "f5-cne-gateway-class"
+	}
+	if data.NetworkRef == "" {
+		data.NetworkRef = InfraIntNetwork
+	}
+	return renderTemplate("templates/egress.yaml.tmpl", data)
 }
 
 // RenderNADs renders the NetworkAttachmentDefinition custom resources.
