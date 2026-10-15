@@ -99,6 +99,13 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	}
 	ns, name := cneInstanceRef(ctx)
 	obj, err := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx.Ctx, name, metav1.GetOptions{})
+	if err != nil && scenarios.IsNotFound(err) && name != "instance" {
+		if o2, err2 := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx.Ctx, "instance", metav1.GetOptions{}); err2 == nil {
+			name = "instance"
+			obj = o2
+			err = nil
+		}
+	}
 	if err == nil {
 		enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "coreCollection", "enabled")
 		if found && enabled {
@@ -219,7 +226,7 @@ func checkCoreMond(ctx context.Context, sctx *scenarios.Context) (crOK, dsOK, co
 
 // findCoreMond looks for a CoreMond CR where FLO puts it.
 func findCoreMond(ctx context.Context, sctx *scenarios.Context) (bool, string, string) {
-	for _, ns := range []string{bnkconst.InstanceNamespace, "f5-cne-core"} {
+	for _, ns := range []string{bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils"} {
 		list, err := sctx.Dynamic.Resource(coreMondGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
 		if err != nil || len(list.Items) == 0 {
 			continue
@@ -252,6 +259,13 @@ func coreMondDaemonSetReady(ctx context.Context, sctx *scenarios.Context, ns str
 func cneCoreCollectionCondition(ctx context.Context, sctx *scenarios.Context) (bool, string) {
 	ns, name := cneInstanceRef(sctx)
 	cne, err := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil && scenarios.IsNotFound(err) && name != "instance" {
+		if o2, err2 := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, "instance", metav1.GetOptions{}); err2 == nil {
+			name = "instance"
+			cne = o2
+			err = nil
+		}
+	}
 	if err != nil {
 		return false, fmt.Sprintf("CNEInstance %s/%s: %v", ns, name, err)
 	}

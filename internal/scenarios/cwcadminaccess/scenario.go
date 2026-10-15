@@ -26,6 +26,15 @@ const (
 	cwcPort      = "38081"
 )
 
+func findCWCNamespace(ctx context.Context, sctx *scenarios.Context) string {
+	if sctx.Clientset != nil {
+		if _, err := sctx.Clientset.CoreV1().Secrets("f5-utils").Get(ctx, "cwc-auth-token", metav1.GetOptions{}); err == nil {
+			return "f5-utils"
+		}
+	}
+	return cwcNamespace
+}
+
 func init() { scenarios.Register(&scenario{}) }
 
 type VerifyDeps struct {
@@ -42,24 +51,25 @@ func realVerifyDeps() VerifyDeps {
 			if sctx.Clientset == nil {
 				return true, true, true, "dry-run verification pass"
 			}
-			_, errCerts := sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-license-certs", metav1.GetOptions{})
+			cwcNS := findCWCNamespace(ctx, sctx)
+			_, errCerts := sctx.Clientset.CoreV1().Secrets(cwcNS).Get(ctx, "cwc-license-certs", metav1.GetOptions{})
 			if errCerts != nil {
-				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-license-client-certs", metav1.GetOptions{})
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNS).Get(ctx, "cwc-license-client-certs", metav1.GetOptions{})
 			}
 			if errCerts != nil {
-				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "bnk-forge-cwc-client-tls", metav1.GetOptions{})
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNS).Get(ctx, "bnk-forge-cwc-client-tls", metav1.GetOptions{})
 			}
 			if errCerts != nil {
-				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "certificatechain", metav1.GetOptions{})
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNS).Get(ctx, "certificatechain", metav1.GetOptions{})
 			}
 			if errCerts != nil {
-				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "certificate", metav1.GetOptions{})
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNS).Get(ctx, "certificate", metav1.GetOptions{})
 			}
-			_, errToken := sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-auth-token", metav1.GetOptions{})
+			_, errToken := sctx.Clientset.CoreV1().Secrets(cwcNS).Get(ctx, "cwc-auth-token", metav1.GetOptions{})
 
 			certsPresent := errCerts == nil
 			tokenPresent := errToken == nil
-			detail := fmt.Sprintf("cwc-license-certs=%v, cwc-auth-token=%v", certsPresent, tokenPresent)
+			detail := fmt.Sprintf("cwc-license-certs=%v, cwc-auth-token=%v (ns=%s)", certsPresent, tokenPresent, cwcNS)
 			return certsPresent && tokenPresent, true, true, detail
 		},
 	}
@@ -121,12 +131,13 @@ func (s *scenario) Manifests(ctx *scenarios.Context) ([]string, error) {
 
 func (s *scenario) Apply(ctx *scenarios.Context) error {
 	ns := s.Namespace(ctx)
+	cwcNS := findCWCNamespace(ctx.Ctx, ctx)
 	if ctx.Clientset != nil {
-		// Replicate secrets from f5-cne-core if present
-		if !replicateSecret(ctx.Ctx, ctx, "cwc-license-client-certs", cwcNamespace, ns) {
-			replicateSecretAs(ctx.Ctx, ctx, "certificatechain", cwcNamespace, "cwc-license-client-certs", ns)
+		// Replicate secrets from cwcNS if present
+		if !replicateSecret(ctx.Ctx, ctx, "cwc-license-client-certs", cwcNS, ns) {
+			replicateSecretAs(ctx.Ctx, ctx, "certificatechain", cwcNS, "cwc-license-client-certs", ns)
 		}
-		replicateSecret(ctx.Ctx, ctx, "cwc-auth-token", cwcNamespace, ns)
+		replicateSecret(ctx.Ctx, ctx, "cwc-auth-token", cwcNS, ns)
 	}
 	return scenarios.ApplyManifests(ctx, scnName)
 }

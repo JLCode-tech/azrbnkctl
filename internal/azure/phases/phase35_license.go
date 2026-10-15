@@ -9,6 +9,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
@@ -82,6 +83,25 @@ func Phase35License(ctx context.Context, cl *intent.Cluster, st *state.State, _ 
 
 	if err := applier.ApplyAll(ctx, objs, true); err != nil {
 		return fmt.Errorf("phase35: applying license CR: %w", err)
+	}
+
+	// Also apply License CR to f5-utils where f5-spk-cwc runs, ensuring CWC immediately detects and activates it.
+	utilsLic := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "k8s.f5net.com/v1",
+			"kind":       "License",
+			"metadata": map[string]interface{}{
+				"name":      "bnk-license",
+				"namespace": "f5-utils",
+			},
+			"spec": map[string]interface{}{
+				"operationMode": "connected",
+				"jwt":           jwtToken,
+			},
+		},
+	}
+	if _, uErr := applier.Apply(ctx, utilsLic, true); uErr != nil {
+		fmt.Fprintf(os.Stderr, "[phase 35] warn: applying License CR in f5-utils: %v\n", uErr)
 	}
 
 	fmt.Fprintln(os.Stderr, "[phase 35] License CR applied OK")

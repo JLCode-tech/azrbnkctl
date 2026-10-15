@@ -40,7 +40,7 @@ bnk:
 
 egress:
   enabled: true
-  namespace: "egress-demo"
+  namespace: "bnk-demo"
   port: 4789
 
 forge:

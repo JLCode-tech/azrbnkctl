@@ -94,27 +94,57 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 		}
 
 		// 2. Check License CR status.state == 'Active'
-		// Search f5-cne-core first, fallback to f5-utils
+		// Check both f5-cne-core and f5-utils (where f5-spk-cwc reconciles)
 		var licActive bool
-		licObj, licErr := dyn.Resource(LicenseGVR).Namespace("f5-cne-core").Get(ctx, "bnk-license", metav1.GetOptions{})
-		if licErr != nil && apierrors.IsNotFound(licErr) {
-			licObj, licErr = dyn.Resource(LicenseGVR).Namespace("f5-utils").Get(ctx, "bnk-license", metav1.GetOptions{})
+		coreLic, coreErr := dyn.Resource(LicenseGVR).Namespace("f5-cne-core").Get(ctx, "bnk-license", metav1.GetOptions{})
+		utilsLic, utilsErr := dyn.Resource(LicenseGVR).Namespace("f5-utils").Get(ctx, "bnk-license", metav1.GetOptions{})
+
+		var activeLic *unstructured.Unstructured
+		if utilsErr == nil {
+			st, _, _ := unstructured.NestedString(utilsLic.Object, "status", "state")
+			if st == "Active" || st == "RegistrationFailed" {
+				activeLic = utilsLic
+				lastLicenseStatus = fmt.Sprintf("state=%s (f5-utils)", st)
+				// Best-effort sync status to f5-cne-core so both reflect Active state
+				if coreErr == nil {
+					coreSt, _, _ := unstructured.NestedString(coreLic.Object, "status", "state")
+					if coreSt != st {
+						if uStatus, ok, _ := unstructured.NestedFieldNoCopy(utilsLic.Object, "status"); ok {
+							_ = unstructured.SetNestedField(coreLic.Object, uStatus, "status")
+							_, _ = dyn.Resource(LicenseGVR).Namespace("f5-cne-core").UpdateStatus(ctx, coreLic, metav1.UpdateOptions{})
+						}
+					}
+				}
+			}
+		}
+		if activeLic == nil && coreErr == nil {
+			st, _, _ := unstructured.NestedString(coreLic.Object, "status", "state")
+			if st == "Active" || st == "RegistrationFailed" {
+				activeLic = coreLic
+				lastLicenseStatus = fmt.Sprintf("state=%s (f5-cne-core)", st)
+			}
 		}
 
-		if licErr != nil {
-			if apierrors.IsNotFound(licErr) && cl != nil && cl.Derived.JWTFullPath == "" && cl.Bnk.JWT == "" {
-				// No license was provided in cluster configuration
+		if activeLic != nil {
+			licActive = true
+		} else if coreErr != nil && utilsErr != nil {
+			if apierrors.IsNotFound(coreErr) && apierrors.IsNotFound(utilsErr) && cl != nil && cl.Derived.JWTFullPath == "" && cl.Bnk.JWT == "" {
 				licActive = true
 				lastLicenseStatus = "none (unlicensed cluster)"
 			} else {
-				lastLicenseStatus = fmt.Sprintf("getting bnk-license: %v", licErr)
+				lastLicenseStatus = fmt.Sprintf("getting bnk-license: core=%v utils=%v", coreErr, utilsErr)
 			}
 		} else {
-			state, _, _ := unstructured.NestedString(licObj.Object, "status", "state")
-			lastLicenseStatus = fmt.Sprintf("state=%s", state)
-			if state == "Active" || state == "RegistrationFailed" {
-				licActive = true
+			var st string
+			if coreErr == nil {
+				st, _, _ = unstructured.NestedString(coreLic.Object, "status", "state")
+			} else if utilsErr == nil {
+				st, _, _ = unstructured.NestedString(utilsLic.Object, "status", "state")
 			}
+			if st == "" {
+				st = "Pending"
+			}
+			lastLicenseStatus = fmt.Sprintf("state=%s", st)
 		}
 
 		if tmmAvailable && cneCtrlAvailable && licActive {

@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/azure"
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
@@ -51,6 +54,21 @@ func Phase36GatewayAPI(ctx context.Context, cl *intent.Cluster, st *state.State,
 	}
 
 	if _, err := applier.Apply(ctx, gwc, true); err != nil {
+		if strings.Contains(err.Error(), "immutable") {
+			dyn, dynErr := k8s.NewDynamicFromConfig(cfg)
+			if dynErr == nil {
+				gvr := schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gatewayclasses"}
+				if existing, getErr := dyn.Resource(gvr).Get(ctx, gwcName, metav1.GetOptions{}); getErr == nil {
+					unstructured.RemoveNestedField(existing.Object, "metadata", "finalizers")
+					_, _ = dyn.Resource(gvr).Update(ctx, existing, metav1.UpdateOptions{})
+					_ = dyn.Resource(gvr).Delete(ctx, gwcName, metav1.DeleteOptions{})
+				}
+				if _, err2 := applier.Apply(ctx, gwc, true); err2 == nil {
+					fmt.Fprintln(os.Stderr, "[phase 36] GatewayClass OK (recreated)")
+					return nil
+				}
+			}
+		}
 		return fmt.Errorf("phase36: applying GatewayClass: %w", err)
 	}
 

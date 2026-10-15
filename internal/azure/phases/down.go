@@ -177,6 +177,8 @@ func stripStuckFinalizers(ctx context.Context, kubeconfigPath string) {
 		"cwcs.k8s.f5.com",
 		"ipamcontrollers.k8s.f5.com",
 		"rabbitmqs.k8s.f5.com",
+		"ipams.fic.f5.com",
+		"ipamranges.fic.f5.com",
 	}
 	gvrs := crdsToGVRs(crds)
 	namespaces := []string{

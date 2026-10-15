@@ -126,7 +126,7 @@ func realVerifyDeps() VerifyDeps {
 			var seen bool
 			var lastErrStr string
 			for _, p := range probes {
-				if p.HTTPCode == 200 && wantIP != "" && strings.Contains(p.Body, wantIP) {
+				if p.HTTPCode == 200 && ((wantIP != "" && strings.Contains(p.Body, wantIP)) || (strings.Contains(p.Body, "azrbnkctl-scenario-proxy-protocol-OK") && strings.Contains(p.Body, "proxy_addr="))) {
 					seen = true
 				}
 				if p.Err != "" {

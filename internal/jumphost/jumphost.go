@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,9 +31,51 @@ const DefaultProbePod = "test-probe"
 // DefaultProbeNamespace is the default namespace for the in-cluster probe pod.
 const DefaultProbeNamespace = "default"
 
+func ensureKubeconfigEnv(cmd *exec.Cmd) {
+	if os.Getenv("KUBECONFIG") != "" {
+		return
+	}
+	matches, _ := filepath.Glob(".azrbnkctl/*/kubeconfig")
+	if len(matches) > 0 {
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+matches[0])
+	}
+}
+
+func isNamedPodRunning(pod, ns string) bool {
+	cmd := exec.Command("kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.phase}")
+	ensureKubeconfigEnv(cmd)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return strings.TrimSpace(out.String()) == "Running"
+}
+
+func findTMMProbePod() string {
+	cmd := exec.Command("kubectl", "get", "pods", "-n", "f5-cne-system", "-l", "app=f5-tmm", "-o", "jsonpath={.items[0].metadata.name}")
+	ensureKubeconfigEnv(cmd)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err == nil {
+		return strings.TrimSpace(out.String())
+	}
+	return ""
+}
+
 func probePodName() string {
 	if pod := os.Getenv("AZRBNKCTL_PROBE_POD"); pod != "" {
+		if pod == "auto" || pod == "tmm" || pod == "f5-tmm" {
+			if tmmPod := findTMMProbePod(); tmmPod != "" {
+				return tmmPod
+			}
+		}
 		return pod
+	}
+	if !isNamedPodRunning(DefaultProbePod, DefaultProbeNamespace) {
+		if tmmPod := findTMMProbePod(); tmmPod != "" {
+			return tmmPod
+		}
 	}
 	return DefaultProbePod
 }
@@ -41,7 +84,23 @@ func probePodNamespace() string {
 	if ns := os.Getenv("AZRBNKCTL_PROBE_NAMESPACE"); ns != "" {
 		return ns
 	}
+	if pod := os.Getenv("AZRBNKCTL_PROBE_POD"); pod == "auto" || pod == "tmm" || pod == "f5-tmm" {
+		return "f5-cne-system"
+	}
+	if !isNamedPodRunning(DefaultProbePod, DefaultProbeNamespace) && findTMMProbePod() != "" {
+		return "f5-cne-system"
+	}
 	return DefaultProbeNamespace
+}
+
+func probePodContainer() string {
+	if c := os.Getenv("AZRBNKCTL_PROBE_CONTAINER"); c != "" {
+		return c
+	}
+	if strings.HasPrefix(probePodName(), "f5-tmm") {
+		return "debug"
+	}
+	return ""
 }
 
 // IsProbePodRunning checks if the in-cluster probe pod is available and running.
@@ -49,6 +108,7 @@ func IsProbePodRunning(ctx context.Context) bool {
 	pod := probePodName()
 	ns := probePodNamespace()
 	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.phase}") // #nosec G204 -- controlled args
+	ensureKubeconfigEnv(cmd)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -62,6 +122,7 @@ func ProbePodIP(ctx context.Context) string {
 	pod := probePodName()
 	ns := probePodNamespace()
 	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.podIP}") // #nosec G204 -- controlled args
+	ensureKubeconfigEnv(cmd)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -73,8 +134,14 @@ func ProbePodIP(ctx context.Context) string {
 func execInProbe(ctx context.Context, cmdStr string) (string, error) {
 	pod := probePodName()
 	ns := probePodNamespace()
-	args := []string{"exec", "-n", ns, pod, "--", "sh", "-c", cmdStr}
+	container := probePodContainer()
+	args := []string{"exec", "-n", ns}
+	if container != "" {
+		args = append(args, "-c", container)
+	}
+	args = append(args, pod, "--", "sh", "-c", cmdStr)
 	cmd := exec.CommandContext(ctx, "kubectl", args...) // #nosec G204 -- controlled args
+	ensureKubeconfigEnv(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -87,8 +154,14 @@ func execInProbe(ctx context.Context, cmdStr string) (string, error) {
 func execInProbeWithStdin(ctx context.Context, cmdStr string, stdin io.Reader) (string, error) {
 	pod := probePodName()
 	ns := probePodNamespace()
-	args := []string{"exec", "-i", "-n", ns, pod, "--", "sh", "-c", cmdStr}
+	container := probePodContainer()
+	args := []string{"exec", "-i", "-n", ns}
+	if container != "" {
+		args = append(args, "-c", container)
+	}
+	args = append(args, pod, "--", "sh", "-c", cmdStr)
 	cmd := exec.CommandContext(ctx, "kubectl", args...) // #nosec G204 -- controlled args
+	ensureKubeconfigEnv(cmd)
 	if stdin != nil {
 		cmd.Stdin = stdin
 	}
