@@ -244,6 +244,32 @@ func TestPhase40Activation_Timeout_LicenseNotActive(t *testing.T) {
 	}
 }
 
+func TestPhase40Activation_Timeout_RegistrationFailed(t *testing.T) {
+	cne := fakeCNEInstance(true, true)
+	lic := fakeLicense("f5-utils", "RegistrationFailed")
+	dyn := fakeActivationDynamic(cne, lic)
+	kube := fakeKubeClientWithPods()
+
+	var buf bytes.Buffer
+	cl := &intent.Cluster{
+		Bnk: intent.BnkSpec{
+			JWT: "some-jwt",
+		},
+	}
+
+	err := pollActivation(context.Background(), dyn, kube, cl, 50*time.Millisecond, 10*time.Millisecond, &buf)
+	if err == nil {
+		t.Fatal("expected timeout error when license is RegistrationFailed, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "state=RegistrationFailed") {
+		t.Errorf("expected state=RegistrationFailed in error message, got: %v", err)
+	}
+	if !strings.Contains(buf.String(), "state=RegistrationFailed") {
+		t.Errorf("expected RegistrationFailed warning in output, got: %s", buf.String())
+	}
+}
+
 func TestPhase40Activation_DryRun(t *testing.T) {
 	st, _ := state.New(t.TempDir())
 	cl := &intent.Cluster{}

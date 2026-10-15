@@ -114,15 +114,22 @@ type BnkSpec struct {
 
 // EgressSpec defines egress/NAT settings.
 type EgressSpec struct {
-	Enabled   bool   `yaml:"enabled"`
-	Namespace string `yaml:"namespace,omitempty"`
-	Port      int    `yaml:"port,omitempty"`
+	Enabled          bool   `yaml:"enabled"`
+	Namespace        string `yaml:"namespace,omitempty"`
+	Port             int    `yaml:"port,omitempty"`
+	GatewayClassName string `yaml:"gatewayClassName,omitempty"`
+}
+
+// JumphostSpec defines optional jumphost testing settings.
+type JumphostSpec struct {
+	Enabled bool `yaml:"enabled,omitempty"`
 }
 
 // TestingSpec defines automated testing parameters.
 type TestingSpec struct {
-	Enabled    bool   `yaml:"enabled"`
-	TargetHost string `yaml:"targetHost,omitempty"`
+	Enabled    bool         `yaml:"enabled"`
+	TargetHost string       `yaml:"targetHost,omitempty"`
+	Jumphost   JumphostSpec `yaml:"jumphost,omitempty"`
 }
 
 // ForgeSpec captures the operator-declared forge integration.
@@ -147,6 +154,9 @@ type ForgeSpec struct {
 	// ProjectType is the forge project type (e.g. "cloud-azure").
 	// Default "cloud-azure".
 	ProjectType string `yaml:"projectType,omitempty"`
+	// CloudProvider is the forge project cloud provider (e.g. "azure").
+	// Default "azure".
+	CloudProvider string `yaml:"cloudProvider,omitempty"`
 	// ProjectName is the name of the forge project to register the cluster into.
 	// Defaults to "azrbnkctl-" + workspace.
 	ProjectName string `yaml:"projectName,omitempty"`
@@ -155,6 +165,14 @@ type ForgeSpec struct {
 	AgentToken string `yaml:"agent_token,omitempty"`
 	// AgentTokenCamel is a fallback alias for camelCase YAML configs (agentToken).
 	AgentTokenCamel string `yaml:"agentToken,omitempty"`
+}
+
+// ResolveProjectName returns the Forge project name, falling back to "azrbnkctl-" + clusterName.
+func (f *ForgeSpec) ResolveProjectName(clusterName string) string {
+	if f != nil && f.ProjectName != "" {
+		return f.ProjectName
+	}
+	return "azrbnkctl-" + clusterName
 }
 
 // ResolveAgentToken returns the agent token to use, in priority order:

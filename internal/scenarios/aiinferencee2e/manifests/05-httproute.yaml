@@ -74,5 +74,5 @@ spec:
       port: 8000
 {{- else}}
     - name: vllm
-      port: 80
+      port: 8000
 {{- end}}

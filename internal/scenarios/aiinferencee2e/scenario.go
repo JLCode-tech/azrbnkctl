@@ -687,7 +687,14 @@ func ensureFARSecret(ctx *scenarios.Context, ns string) error {
 		return nil
 	}
 	secrets := ctx.Clientset.CoreV1()
-	src, err := secrets.Secrets("f5-cne-system").Get(ctx.Ctx, farSecretName, metav1.GetOptions{})
+	var src *corev1.Secret
+	var err error
+	for _, srcNS := range []string{"f5-cne-system", "f5-cne-core", "f5-utils"} {
+		src, err = secrets.Secrets(srcNS).Get(ctx.Ctx, farSecretName, metav1.GetOptions{})
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return err
 	}

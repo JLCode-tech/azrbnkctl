@@ -205,12 +205,24 @@ type restProject struct {
 }
 
 func restCreateProject(ctx context.Context, base, token string, req RegisterRequest) (restProject, error) {
+	projectType := req.ProjectType
+	if projectType == "" {
+		projectType = "cloud-azure"
+	}
+	cloudProvider := req.CloudProvider
+	if cloudProvider == "" {
+		cloudProvider = "azure"
+	}
+	env := req.Environment
+	if env == "" {
+		env = "dev"
+	}
 	body := map[string]any{
 		"name":           req.ProjectName,
-		"project_type":   "cloud-azure",
-		"cloud_provider": "azure",
+		"project_type":   projectType,
+		"cloud_provider": cloudProvider,
 		"region":         req.Region,
-		"environment":    "dev",
+		"environment":    env,
 		"description":    fmt.Sprintf("Created by azrbnkctl for workspace %q", req.WorkspaceName),
 	}
 	if req.CredentialTemplateID > 0 {
@@ -277,9 +289,13 @@ type restCluster struct {
 
 func restCreateCluster(ctx context.Context, base, token string, projectID int, req RegisterRequest) (restCluster, error) {
 	encodedKubeconfig := base64.StdEncoding.EncodeToString(req.Kubeconfig)
+	cloudProvider := req.CloudProvider
+	if cloudProvider == "" {
+		cloudProvider = "azure"
+	}
 	body := map[string]any{
 		"name":           req.ClusterName,
-		"cloud_provider": "azure",
+		"cloud_provider": cloudProvider,
 		"region":         req.Region,
 		"kubeconfig":     encodedKubeconfig,
 	}

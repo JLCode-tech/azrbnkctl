@@ -97,16 +97,8 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	if ctx.Dynamic == nil {
 		return nil
 	}
-	ns, name := cneInstanceRef(ctx)
-	obj, err := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx.Ctx, name, metav1.GetOptions{})
-	if err != nil && scenarios.IsNotFound(err) && name != "instance" {
-		if o2, err2 := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx.Ctx, "instance", metav1.GetOptions{}); err2 == nil {
-			name = "instance"
-			obj = o2
-			err = nil
-		}
-	}
-	if err == nil {
+	ns, name, obj, err := resolveCNEInstance(ctx.Ctx, ctx)
+	if err == nil && obj != nil {
 		enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "coreCollection", "enabled")
 		if found && enabled {
 			// Already enabled at rollout — no patch needed, no DaemonSet restart.
@@ -126,6 +118,41 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 		return fmt.Errorf("patch CNEInstance %s/%s for coreCollection: %w", ns, name, err)
 	}
 	return nil
+}
+
+// resolveCNEInstance locates the CNEInstance by explicit/derived ref first, then
+// "instance", then lists CNEInstances in f5-cne-system, f5-cne-core, and f5-utils
+// when no explicit cne-instance option was supplied.
+func resolveCNEInstance(ctx context.Context, sctx *scenarios.Context) (string, string, *unstructured.Unstructured, error) {
+	ns, name := cneInstanceRef(sctx)
+	if name != "" {
+		obj, err := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			return ns, name, obj, nil
+		}
+		if !scenarios.IsNotFound(err) {
+			return ns, name, nil, err
+		}
+	}
+	if sctx.Options["cne-instance"] == "" {
+		if name != "instance" {
+			if o2, err2 := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, "instance", metav1.GetOptions{}); err2 == nil {
+				return ns, "instance", o2, nil
+			}
+		}
+		searchNamespaces := []string{ns}
+		if sctx.Options["cne-namespace"] == "" {
+			searchNamespaces = []string{bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils"}
+		}
+		for _, candidateNS := range searchNamespaces {
+			list, listErr := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(candidateNS).List(ctx, metav1.ListOptions{})
+			if listErr == nil && len(list.Items) > 0 {
+				item := &list.Items[0]
+				return candidateNS, item.GetName(), item, nil
+			}
+		}
+	}
+	return ns, name, nil, nil
 }
 
 // cneInstanceRef returns the namespace and name of the CNEInstance Phase 22
@@ -226,12 +253,19 @@ func checkCoreMond(ctx context.Context, sctx *scenarios.Context) (crOK, dsOK, co
 
 // findCoreMond looks for a CoreMond CR where FLO puts it.
 func findCoreMond(ctx context.Context, sctx *scenarios.Context) (bool, string, string) {
-	for _, ns := range []string{bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils"} {
+	for _, ns := range []string{bnkconst.InstanceNamespace, "f5-cne-core", "f5-utils", ""} {
 		list, err := sctx.Dynamic.Resource(coreMondGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
 		if err != nil || len(list.Items) == 0 {
 			continue
 		}
-		return true, ns, fmt.Sprintf("CoreMond %s/%s present", ns, list.Items[0].GetName())
+		foundNS := list.Items[0].GetNamespace()
+		if foundNS == "" {
+			foundNS = ns
+		}
+		if foundNS == "" {
+			foundNS = bnkconst.InstanceNamespace
+		}
+		return true, foundNS, fmt.Sprintf("CoreMond %s/%s present", foundNS, list.Items[0].GetName())
 	}
 	return false, "", "no CoreMond CR in " + bnkconst.InstanceNamespace + " or f5-cne-core"
 }
@@ -257,14 +291,9 @@ func coreMondDaemonSetReady(ctx context.Context, sctx *scenarios.Context, ns str
 
 // cneCoreCollectionCondition reads the CNEInstance this scenario patched.
 func cneCoreCollectionCondition(ctx context.Context, sctx *scenarios.Context) (bool, string) {
-	ns, name := cneInstanceRef(sctx)
-	cne, err := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil && scenarios.IsNotFound(err) && name != "instance" {
-		if o2, err2 := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, "instance", metav1.GetOptions{}); err2 == nil {
-			name = "instance"
-			cne = o2
-			err = nil
-		}
+	ns, name, cne, err := resolveCNEInstance(ctx, sctx)
+	if err == nil && cne == nil {
+		cne, err = sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 	}
 	if err != nil {
 		return false, fmt.Sprintf("CNEInstance %s/%s: %v", ns, name, err)

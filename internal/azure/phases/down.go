@@ -57,16 +57,17 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	return nil
 }
 
-// PhaseDownNAT tears down the NAT Gateway and associated Public IP.
+// PhaseDownNAT tears down the NAT Gateway and associated Public IPs.
 func PhaseDownNAT(ctx context.Context, cl *intent.Cluster, st *state.State, clients *azure.Clients, dryRun bool) error {
 	rgName := cl.Derived.ResourceGroupName
 	natName := cl.Derived.NatGatewayName
+	natPipName := cl.Derived.NatGatewayPublicIPName
 	pipName := cl.Derived.PublicIPName
 
-	fmt.Fprintf(os.Stderr, "[down] nat-gateway: deleting %s and public-ip %s\n", natName, pipName)
+	fmt.Fprintf(os.Stderr, "[down] nat-gateway: deleting %s and public-ips (%s, %s)\n", natName, natPipName, pipName)
 
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[down] [dry-run] would delete NAT Gateway %s and Public IP %s\n", natName, pipName)
+		fmt.Fprintf(os.Stderr, "[down] [dry-run] would delete NAT Gateway %s and Public IPs (%s, %s)\n", natName, natPipName, pipName)
 		return nil
 	}
 
@@ -78,8 +79,16 @@ func PhaseDownNAT(ctx context.Context, cl *intent.Cluster, st *state.State, clie
 		_, _ = poller.PollUntilDone(ctx, nil)
 	}
 
-	if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rgName, pipName, nil); err == nil {
-		_, _ = poller.PollUntilDone(ctx, nil)
+	if natPipName != "" {
+		if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rgName, natPipName, nil); err == nil {
+			_, _ = poller.PollUntilDone(ctx, nil)
+		}
+	}
+
+	if pipName != "" && pipName != natPipName {
+		if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rgName, pipName, nil); err == nil {
+			_, _ = poller.PollUntilDone(ctx, nil)
+		}
 	}
 
 	return nil
@@ -89,7 +98,10 @@ func PhaseDownNAT(ctx context.Context, cl *intent.Cluster, st *state.State, clie
 func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, st *state.State, clients *azure.Clients, dryRun bool) error {
 	rgName := cl.Derived.ResourceGroupName
 	vnetName := cl.Derived.VNetName
-	nsgName := fmt.Sprintf("nsg-%s", cl.Metadata.Name)
+	nsgName := cl.Derived.NSGName
+	if nsgName == "" {
+		nsgName = fmt.Sprintf("nsg-%s", cl.Metadata.Name)
+	}
 
 	fmt.Fprintf(os.Stderr, "[down] networks: deleting VNet %s and NSG %s\n", vnetName, nsgName)
 

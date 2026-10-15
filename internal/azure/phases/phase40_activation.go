@@ -102,7 +102,7 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 		var activeLic *unstructured.Unstructured
 		if utilsErr == nil {
 			st, _, _ := unstructured.NestedString(utilsLic.Object, "status", "state")
-			if st == "Active" || st == "RegistrationFailed" {
+			if st == "Active" {
 				activeLic = utilsLic
 				lastLicenseStatus = fmt.Sprintf("state=%s (f5-utils)", st)
 				// Best-effort sync status to f5-cne-core so both reflect Active state
@@ -115,13 +115,17 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 						}
 					}
 				}
+			} else if st == "RegistrationFailed" {
+				fmt.Fprintln(out, "[phase 40] warn: License CR f5-utils/bnk-license state=RegistrationFailed — waiting for license activation")
 			}
 		}
 		if activeLic == nil && coreErr == nil {
 			st, _, _ := unstructured.NestedString(coreLic.Object, "status", "state")
-			if st == "Active" || st == "RegistrationFailed" {
+			if st == "Active" {
 				activeLic = coreLic
 				lastLicenseStatus = fmt.Sprintf("state=%s (f5-cne-core)", st)
+			} else if st == "RegistrationFailed" {
+				fmt.Fprintln(out, "[phase 40] warn: License CR f5-cne-core/bnk-license state=RegistrationFailed — waiting for license activation")
 			}
 		}
 
@@ -136,10 +140,11 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 			}
 		} else {
 			var st string
-			if coreErr == nil {
-				st, _, _ = unstructured.NestedString(coreLic.Object, "status", "state")
-			} else if utilsErr == nil {
+			if utilsErr == nil {
 				st, _, _ = unstructured.NestedString(utilsLic.Object, "status", "state")
+			}
+			if st == "" && coreErr == nil {
+				st, _, _ = unstructured.NestedString(coreLic.Object, "status", "state")
 			}
 			if st == "" {
 				st = "Pending"
@@ -153,13 +158,13 @@ func pollActivation(ctx context.Context, dyn dynamic.Interface, kubeClient kuber
 		}
 
 		if time.Now().After(deadline) {
-			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-cne-system", "f5-cne-core"}, out)
+			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-cne-system", "f5-cne-core", "f5-utils"}, out)
 			return fmt.Errorf("phase40: activation timed out waiting for readiness after %s (CNEInstance: %s; License: %s)", timeout, lastCNEStatus, lastLicenseStatus)
 		}
 
 		select {
 		case <-ctx.Done():
-			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-cne-system", "f5-cne-core"}, out)
+			dumpPodDiagnostics(ctx, kubeClient, []string{"f5-cne-system", "f5-cne-core", "f5-utils"}, out)
 			return fmt.Errorf("phase40: context cancelled waiting for activation: %w", ctx.Err())
 		case <-time.After(pollInterval):
 		}

@@ -422,7 +422,7 @@ type bnkComponent struct {
 
 var bnkComponents = []bnkComponent{
 	{"flo", "F5 Lifecycle Operator", "f5-cne-core", "app.kubernetes.io/name=f5-lifecycle-operator", ""},
-	{"cwc", "F5 SPK Cluster Wide Controller", "f5-cne-core", "app=f5-spk-cwc", ""},
+	{"cwc", "F5 SPK Cluster Wide Controller", "f5-utils", "app=cwc", ""},
 	{"cis", "F5 BNK CIS controller", "f5-cne-system", "app=f5-bnk-cis", ""},
 	{"cne", "F5 CNE controller", "f5-cne-system", "app=f5-cne-controller", "f5-cne-controller"},
 	{"cert-manager", "cert-manager", "cert-manager", "app.kubernetes.io/instance=cert-manager", ""},
@@ -510,6 +510,24 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 		LabelSelector: comp.Selector,
 	})
+	if (err != nil || len(pods.Items) == 0) && comp.Name == "cwc" && flagLogsNamespace == "" {
+		for _, candidateNS := range []string{"f5-utils", "f5-cne-core"} {
+			for _, sel := range []string{"app=cwc", "app=f5-spk-cwc"} {
+				pList, listErr := cs.CoreV1().Pods(candidateNS).List(ctx, metav1.ListOptions{
+					LabelSelector: sel,
+				})
+				if listErr == nil && len(pList.Items) > 0 {
+					pods = pList
+					ns = candidateNS
+					err = nil
+					break
+				}
+			}
+			if pods != nil && len(pods.Items) > 0 {
+				break
+			}
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("listing %s pods in %s: %w", component, ns, err)
 	}

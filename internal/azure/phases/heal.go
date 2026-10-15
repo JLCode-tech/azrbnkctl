@@ -240,10 +240,18 @@ var Repairs = []Repair{
 			if err != nil || pod == nil {
 				return "", err
 			}
-			if err := d.Clients.K8s.CoreV1().Pods(cwcNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+			ns := pod.Namespace
+			if ns == "" {
+				ns = cwcNamespace
+			}
+			if err := d.Clients.K8s.CoreV1().Pods(ns).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 				return "", fmt.Errorf("delete cwc pod %s: %w", pod.Name, err)
 			}
-			if err := waitPodsReady(ctx, d.Clients, cwcNamespace, cwcLabelSelector, healWait); err != nil {
+			sel := cwcLabelSelector
+			if pod.Labels != nil && pod.Labels["app"] != "" {
+				sel = "app=" + pod.Labels["app"]
+			}
+			if err := waitPodsReady(ctx, d.Clients, ns, sel, healWait); err != nil {
 				return "", err
 			}
 			return "cwc pod " + pod.Name + " deleted; replacement Ready", nil
@@ -511,19 +519,25 @@ func fixPodManager(ctx context.Context, clients *Clients, log io.Writer) (string
 // --- cwc -----------------------------------------------------------------
 
 func cwcPod(ctx context.Context, clients *Clients) (*corev1.Pod, bool, int32, error) {
-	pods, err := clients.K8s.CoreV1().Pods(cwcNamespace).List(ctx, metav1.ListOptions{LabelSelector: cwcLabelSelector})
-	if err != nil {
-		return nil, false, 0, err
-	}
-	for i := range pods.Items {
-		p := &pods.Items[i]
-		if p.DeletionTimestamp != nil {
-			continue
+	var lastErr error
+	for _, ns := range []string{"f5-utils", cwcNamespace} {
+		for _, sel := range []string{cwcLabelSelector, "app=f5-spk-cwc"} {
+			pods, err := clients.K8s.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			for i := range pods.Items {
+				p := &pods.Items[i]
+				if p.DeletionTimestamp != nil {
+					continue
+				}
+				ready, restarts := cwcStatus(p)
+				return p, ready, restarts, nil
+			}
 		}
-		ready, restarts := cwcStatus(p)
-		return p, ready, restarts, nil
 	}
-	return nil, false, 0, nil
+	return nil, false, 0, lastErr
 }
 
 func waitPodsReady(ctx context.Context, clients *Clients, ns, selector string, timeout time.Duration) error {

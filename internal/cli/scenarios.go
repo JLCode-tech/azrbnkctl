@@ -129,6 +129,15 @@ func topoSort(all []scenarios.Scenario) ([]scenarios.Scenario, error) {
 	return finalSorted, nil
 }
 
+func resolveScenarioKubeconfig(st *state.State, cl *intent.Cluster) string {
+	if st != nil {
+		if kp := st.KubeconfigPath(); kp != "" {
+			return kp
+		}
+	}
+	return cl.StateDir() + "/kubeconfig"
+}
+
 // runAllScenarios runs every registered scenario in topo-sorted dependency order.
 func runAllScenarios(cmd *cobra.Command, cl *intent.Cluster, st *state.State) error {
 	all := scenarios.All()
@@ -142,7 +151,7 @@ func runAllScenarios(cmd *cobra.Command, cl *intent.Cluster, st *state.State) er
 		return err
 	}
 
-	kubeconfigPath := cl.StateDir() + "/kubeconfig"
+	kubeconfigPath := resolveScenarioKubeconfig(st, cl)
 	opts := make(map[string]string)
 	if flagScenarioVIP != "" {
 		opts["vip"] = flagScenarioVIP
@@ -166,25 +175,62 @@ func runAllScenarios(cmd *cobra.Command, cl *intent.Cluster, st *state.State) er
 	sctx.ReportStamp = time.Now().UTC().Format("2006-01-02T15-04-05Z")
 	sctx.Verbose = flagVerbose
 
-	var failed []string
+	var (
+		entries      []scenarios.SummaryEntry
+		passedCount  int
+		failedCount  int
+		skippedCount int
+		failed       []string
+	)
+	runStarted := time.Now().UTC()
 	for _, s := range ordered {
 		fmt.Fprintf(os.Stderr, "[scenarios] running %s\n", s.Name())
+		scnStart := time.Now()
 		result := scenarios.Run(sctx, s)
+		scnDur := time.Since(scnStart).Truncate(time.Second).String()
 		if result.EnvDiagram != "" {
 			fmt.Fprintln(os.Stderr, result.EnvDiagram)
 		}
-		if !result.AllPassed() {
+		entries = append(entries, scenarios.SummaryEntry{
+			Name:     s.Name(),
+			Rating:   string(s.Rating()),
+			Status:   result.Status,
+			Duration: scnDur,
+			Summary:  result.Summary,
+		})
+		switch {
+		case result.Status == "skipped":
+			fmt.Fprintf(os.Stderr, "[scenarios] SKIP %s: %s\n", s.Name(), result.Summary)
+			skippedCount++
+		case !result.AllPassed():
 			fmt.Fprintf(os.Stderr, "[scenarios] FAIL %s: %s\n", s.Name(), result.Summary)
+			failedCount++
 			failed = append(failed, s.Name())
-			break
+		default:
+			fmt.Fprintf(os.Stderr, "[scenarios] PASS %s\n", s.Name())
+			passedCount++
 		}
-		fmt.Fprintf(os.Stderr, "[scenarios] PASS %s\n", s.Name())
+	}
+
+	runFinished := time.Now().UTC()
+	summary := scenarios.RunSummary{
+		StartedAt: runStarted,
+		Finished:  runFinished,
+		Duration:  runFinished.Sub(runStarted).Truncate(time.Second).String(),
+		Total:     len(ordered),
+		Passed:    passedCount,
+		Failed:    failedCount,
+		Skipped:   skippedCount,
+		Scenarios: entries,
+	}
+	if sumPath, werr := scenarios.WriteRunSummary(sctx.WorkspaceDir, cl.Metadata.Name, sctx.ReportStamp, summary); werr == nil {
+		fmt.Fprintf(os.Stderr, "[scenarios] summary written: %s\n", sumPath)
 	}
 
 	if len(failed) > 0 {
-		return fmt.Errorf("scenarios run --all: scenario %q failed", failed[0])
+		return fmt.Errorf("scenarios run --all: %d/%d scenario(s) failed (%v)", len(failed), len(ordered), failed)
 	}
-	fmt.Fprintf(os.Stderr, "[scenarios] all %d scenarios green\n", len(ordered))
+	fmt.Fprintf(os.Stderr, "[scenarios] all %d scenarios green (%d passed, %d skipped)\n", len(ordered), passedCount, skippedCount)
 	return nil
 }
 
@@ -296,7 +342,7 @@ func runScenariosRunCmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading state.env: %w", err)
 	}
 
-	kubeconfigPath := cl.StateDir() + "/kubeconfig"
+	kubeconfigPath := resolveScenarioKubeconfig(st, cl)
 	opts := make(map[string]string)
 	if flagScenarioVIP != "" {
 		opts["vip"] = flagScenarioVIP
@@ -349,7 +395,7 @@ func runScenariosCleanCmd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading state.env: %w", err)
 	}
 
-	kubeconfigPath := cl.StateDir() + "/kubeconfig"
+	kubeconfigPath := resolveScenarioKubeconfig(st, cl)
 	sctx, err := scenarios.NewContext(
 		cmd.Context(),
 		kubeconfigPath,

@@ -32,6 +32,15 @@ func Phase32FLO(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azu
 		return fmt.Errorf("phase32: creating applier: %w", err)
 	}
 
+	// Ensure cluster issuers (specifically api-server-cluster-issuer) exist before
+	// applying the FLO manifest so Certificate/flo-f5-lifecycle-operator-webhook-cert
+	// can issue immediately.
+	if issuerBytes, iErr := manifests.FS.ReadFile("static/04-issuers.yaml"); iErr == nil {
+		if issuerObjs, pErr := k8s.ParseYAMLStream(issuerBytes); pErr == nil {
+			_ = applier.ApplyAll(ctx, issuerObjs, true)
+		}
+	}
+
 	floBytes, err := manifests.FS.ReadFile("flo/flo-manifest.yaml")
 	if err != nil {
 		return fmt.Errorf("phase32: reading flo manifest: %w", err)
@@ -54,6 +63,16 @@ func Phase32FLO(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azu
 	fmt.Fprintln(os.Stderr, "[phase 32] flo: waiting for CNEInstance CRD establishment...")
 	if err := k8s.WaitForCRDEstablished(ctx, dyn, "cneinstances.k8s.f5.com", 3*time.Minute); err != nil {
 		return fmt.Errorf("phase32: waiting for cneinstances CRD: %w", err)
+	}
+
+	cs, err := k8s.NewClientsetFromConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("phase32: creating clientset: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "[phase 32] flo: waiting for flo-f5-lifecycle-operator Deployment readiness...")
+	if err := k8s.WaitForDeploymentReady(ctx, cs, "f5-cne-core", "flo-f5-lifecycle-operator", 3*time.Minute); err != nil {
+		return fmt.Errorf("phase32: waiting for flo-f5-lifecycle-operator deployment: %w", err)
 	}
 
 	fmt.Fprintln(os.Stderr, "[phase 32] FLO OK")
