@@ -48,13 +48,13 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 ## Highlights
 
-- **Deterministic Phased Provisioner** — 23 ordered, idempotent phases driven directly via the Azure Go ARM SDK (`armcontainerservice`, `armnetwork`, `armresources`). Azure resource tags serve as the single source of truth; local state caches accelerate subsequent runs.
+- **Deterministic Phased Provisioner** — 27 ordered, idempotent phases driven directly via the Azure Go ARM SDK (`armcontainerservice`, `armnetwork`, `armresources`). Azure resource tags serve as the single source of truth; local state caches accelerate subsequent runs.
 - **Embedded Kubernetes Engine (`k`)** — Native `client-go` dynamic Server-Side Apply (SSA) engine providing `get`, `apply`, `describe`, `delete`, `logs`, `exec`, and `port-forward` with zero host `kubectl` dependencies.
 - **Automated Node Preparation** — Automatic HugePages allocation (4Gi 2MB HugePages), kernel core dump configuration, and kubelet capacity advertisement.
 - **Native Azure Hardware Discovery** — Dynamic discovery of Azure Accelerated Networking SR-IOV virtual functions (`4567:00:02.0`), Subnet Gateways, and Self IPs.
 - **Agentic Workflow Built-In** — First-class AI pair-programming support with `azrbnkctl agent [gemini, claude, opencode, cursor]`, append-only operational journaling (`azrbnkctl journal`), and BNK Forge MCP integration.
 - **BNK Forge Integration** — Instant one-line cluster registration, project management, and real-time data plane topology visualization with `azrbnkctl forge register`.
-- **Cross-Platform Single Binary** — Statically compiled for Linux (amd64, arm64), macOS (Apple Silicon arm64, Intel amd64), and Windows.
+- **Cross-Platform Single Binary** — Statically compiled for Linux (amd64, arm64), macOS (Apple Silicon arm64, Intel amd64), and Windows, with SHA-256 verified in-place upgrades (`azrbnkctl self update`).
 
 ---
 
@@ -75,21 +75,22 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 ### Option 1: Pre-Built Binary (Recommended)
 
-Download the archive for your OS and architecture from [GitHub Releases](https://github.com/JLCode-tech/azrbnkctl/releases/latest), unpack, and place on your `PATH`:
+Download the archive for your OS and architecture from [GitHub Releases](https://github.com/JLCode-tech/azrbnkctl/releases/latest), unpack, and install onto your `PATH`:
 
 ```bash
 # macOS (Apple Silicon)
 curl -fsSL https://github.com/JLCode-tech/azrbnkctl/releases/latest/download/azrbnkctl_darwin_arm64.tar.gz | tar -xz
-sudo mv azrbnkctl /usr/local/bin/
+./azrbnkctl install
 
 # Linux (x86_64)
 curl -fsSL https://github.com/JLCode-tech/azrbnkctl/releases/latest/download/azrbnkctl_linux_amd64.tar.gz | tar -xz
-sudo mv azrbnkctl /usr/local/bin/
+./azrbnkctl install
 ```
 
-Verify installation:
+Verify installation and upgrade in place at any time:
 ```bash
 azrbnkctl version
+azrbnkctl self update
 ```
 
 ### Option 2: Go Install (Go 1.25+)
@@ -197,6 +198,62 @@ azrbnkctl forge register -f cluster.yaml
 azrbnkctl forge status -f cluster.yaml
 ```
 
+## BNK Forge Integration
+
+`azrbnkctl forge` (`azrbnkctl bnkforge` alias) connects AKS + BNK 2.4 clusters to **F5 BNK Forge** via MCP (`http://localhost:8081/mcp/`) and REST (`http://localhost:8000`):
+
+```bash
+# Register cluster and deploy bnk-forge-agent into f5-utils
+azrbnkctl forge register -f cluster.yaml
+
+# Check Forge registration and MCP reachability
+azrbnkctl forge status -f cluster.yaml
+
+# Run readiness & BNK 2.4 CRD scan
+azrbnkctl forge scan -f cluster.yaml
+
+# Stream live TMM governance and dataplane telemetry
+azrbnkctl forge telemetry -f cluster.yaml
+
+# Run aiperf LLM benchmarks from the Azure jumphost VM against the BNK VIP
+azrbnkctl forge benchmark -f cluster.yaml --scenarios latency,throughput
+```
+
+See [docs/FORGE_INTEGRATION.md](docs/FORGE_INTEGRATION.md) for full configuration and subcommand details.
+
+---
+
+## Command Reference
+
+All 24 top-level commands supported by `azrbnkctl`:
+
+| Command | Description |
+| :--- | :--- |
+| `azrbnkctl init` | Generate a starter `cluster.yaml` intent file |
+| `azrbnkctl validate <cluster.yaml>` | Validate schema, subnet CIDRs, VM sizes, and Kubernetes version gates |
+| `azrbnkctl up -f <cluster.yaml>` | Provision Azure VNet, AKS cluster, TMM node pool, and BNK 2.4 stack (27 phases) |
+| `azrbnkctl down -f <cluster.yaml>` | Tear down AKS cluster and managed network resources in reverse dependency order |
+| `azrbnkctl status -f <cluster.yaml>` | Inspect Azure, AKS, BNK 2.4 (`Infra`, `CNEInstance`, TMM), and Forge status |
+| `azrbnkctl logs [tmm\|controller\|cwc\|flo]` | Stream BNK component or TMM governance logs (`--governance`) |
+| `azrbnkctl get <resource>` | Shorthand alias for `azrbnkctl k get` |
+| `azrbnkctl k <subcommand>` | Embedded `client-go` Kubernetes CLI (`get`, `apply`, `describe`, `delete`, `logs`, `exec`, `port-forward`) |
+| `azrbnkctl doctor` | Run Azure preflight checks and 10-point BNK cluster health diagnostics |
+| `azrbnkctl test [connectivity\|dns\|egress]` | Run data-plane connectivity, DNS latency, and egress SNAT verification |
+| `azrbnkctl scenarios [list\|run\|verify\|clean\|load]` | Deploy, verify, load-test, and clean end-to-end BNK 2.4 traffic & AI scenarios (`clean --all`) |
+| `azrbnkctl benchmark` | Run `aiperf` LLM benchmarks from the Azure jumphost VM against BNK VIPs |
+| `azrbnkctl bnk [status\|heal\|upgrade\|migrate-2.4\|mcp-session\|troubleshoot]` | Day-2 BNK 2.4 operations, self-healing (`--only controller-identity`), and 2.3→2.4 migration |
+| `azrbnkctl forge [register\|status\|unregister\|cleanup\|template\|scan\|telemetry\|benchmark]` | Manage BNK Forge cluster registration, templates, scanning, telemetry, and benchmarks |
+| `azrbnkctl bnkforge` | Backward-compatibility alias for `azrbnkctl forge` |
+| `azrbnkctl topology` | Discover and render live AKS node, SR-IOV VF, and BNK TMM topology |
+| `azrbnkctl manifest [list\|show\|probe]` | Inspect embedded BNK release manifests and probe FAR registry artifacts |
+| `azrbnkctl journal [add\|list\|show\|path\|clear]` | Manage the append-only operational journal |
+| `azrbnkctl agent [claude\|gemini\|opencode\|cursor]` | Launch an AI coding assistant preloaded with cluster context |
+| `azrbnkctl install [--dir <path>] [--force]` | Install the `azrbnkctl` binary into `$PATH` (`/usr/local/bin` or `~/.local/bin`) |
+| `azrbnkctl self [info\|update]` | Inspect binary metadata or perform SHA-256 verified in-place release updates |
+| `azrbnkctl version` | Print version, git commit, and build timestamp |
+| `azrbnkctl completion [bash\|zsh\|fish\|powershell]` | Generate shell completion scripts |
+| `azrbnkctl help [command]` | Display help for any command |
+
 ---
 
 ## Repository Layout
@@ -206,18 +263,21 @@ azrbnkctl/
 ├── .github/                 # GitHub Actions CI/CD workflows and Dependabot
 ├── cmd/                     # CLI entrypoint (azrbnkctl)
 ├── internal/
-│   ├── azure/               # Azure ARM SDK clients and 23 lifecycle phases
-│   ├── bnkforge/            # BNK Forge client & registration logic
-│   ├── cli/                 # Cobra CLI commands (up, down, validate, test, etc.)
-│   ├── doctor/              # Azure subscription preflight checks
+│   ├── azure/               # Azure ARM SDK clients and 27 lifecycle phases
+│   ├── bnkforge/            # BNK Forge MCP & REST registration logic
+│   ├── cli/                 # Cobra CLI commands (24 top-level commands)
+│   ├── doctor/              # Azure subscription and cluster preflight checks
+│   ├── forge/               # BNK Forge telemetry, scan, and benchmark client
 │   ├── intent/              # cluster.yaml schema parsing and validation
 │   ├── journal/             # Append-only operational journal
-│   ├── k8s/                 # Dynamic client-go SSA manifests and templates
+│   ├── k8s/                 # Dynamic client-go SSA manifests, BNK 2.4 templates, and migration
 │   ├── netcalc/             # IPv4/IPv6 CIDR calculations
+│   ├── self/                # SHA-256 verified archive extraction and in-place self-update
 │   └── test/                # Network and DNS latency test runners
 ├── docs/                    # Architecture, phase specifications, and runbooks
-├── examples/                # Declarative cluster definitions (dual-interface, agentfoundry)
-├── scripts/                 # Linting and pre-commit automation scripts
+├── examples/                # Declarative cluster definitions (dual-interface, external-only, agentfoundry-demo)
+├── hack/                    # 11-gate local CI runner (ci-local.sh)
+├── scripts/                 # Security and pre-commit automation scripts
 ├── tools/                   # BNK Forge pack metadata
 ├── Makefile                 # Development build and test automation targets
 └── cluster.yaml             # Default cluster definition

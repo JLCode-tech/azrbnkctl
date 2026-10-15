@@ -40,8 +40,8 @@ const (
 	PatternDualInterface = "dual-interface"
 
 	DefaultLocation           = "eastus"
-	DefaultManifestVersion    = "2.3.2"
-	DefaultDeploymentSize     = "Small"
+	DefaultManifestVersion    = "2.4.0"
+	DefaultDeploymentSize     = "small"
 	DefaultTmmCpu             = "4"
 	DefaultTmmMemory          = "10Gi"
 	DefaultTmmMtu             = 1500
@@ -51,7 +51,7 @@ const (
 	DefaultNetworkPluginMode  = "Overlay"
 	DefaultVNetCIDR           = "10.0.0.0/16"
 	DefaultSystemSubnetCIDR   = "10.0.0.0/20"
-	DefaultPublicSubnetCIDR   = "10.0.16.0/28"
+	DefaultPublicSubnetCIDR   = "10.0.16.0/24"
 	DefaultExternalSubnetCIDR = "10.0.17.0/24"
 	DefaultInternalSubnetCIDR = "10.0.18.0/24"
 )

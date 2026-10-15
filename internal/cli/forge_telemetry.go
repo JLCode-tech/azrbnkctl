@@ -25,8 +25,9 @@ var (
 var forgeTelemetryCmd = &cobra.Command{
 	Use:   "telemetry",
 	Short: "Check the MCP governance records BNK ships to Loki against Forge's LLM Observability schema",
-	Long: `forge telemetry reads the governance stream the agentcore-demo pipeline
-produces (iRule -> f5-fluentbit sidecar -> Fluent Bit DaemonSet -> Loki) and
+	Long: `forge telemetry reads the governance stream the agentfoundry-demo pipeline
+(examples/agentfoundry-demo/cluster.yaml: iRule -> f5-fluentbit sidecar ->
+Fluent Bit DaemonSet -> Loki) produces and
 validates every record against the schema Forge's LLM Observability panel
 reads: stream labels job="llm-gateway" and model, an HTTP status, the client
 address the collector requires, and an action of allow, rate_limited,

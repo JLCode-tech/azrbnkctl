@@ -290,9 +290,9 @@ Use --all to run every registered scenario in topo-sorted dependency order.`,
 }
 
 var scenariosCleanCmd = &cobra.Command{
-	Use:   "clean <name>",
-	Short: "Invoke a scenario's Cleanup hook",
-	Args:  cobra.ExactArgs(1),
+	Use:   "clean [name]",
+	Short: "Invoke a scenario's Cleanup hook (or --all in reverse dependency order)",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runScenariosCleanCmd,
 }
 
@@ -305,6 +305,7 @@ func init() {
 	_ = scenariosRunCmd.MarkFlagRequired("config")
 
 	scenariosCleanCmd.Flags().StringVarP(&flagScenarioConfig, "config", "f", "", "path to cluster.yaml (required)")
+	scenariosCleanCmd.Flags().BoolVar(&flagScenarioAll, "all", false, "clean every registered scenario in reverse dependency order")
 	_ = scenariosCleanCmd.MarkFlagRequired("config")
 
 	scenariosCmd.AddCommand(scenariosListCmd, scenariosRunCmd, scenariosCleanCmd)
@@ -380,10 +381,8 @@ func runScenariosRunCmd(cmd *cobra.Command, args []string) error {
 }
 
 func runScenariosCleanCmd(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	s := scenarios.Find(name)
-	if s == nil {
-		return fmt.Errorf("scenario %q not found", name)
+	if !flagScenarioAll && len(args) == 0 {
+		return fmt.Errorf("usage: azrbnkctl scenarios clean <name> -f <cluster.yaml> (or pass --all)")
 	}
 
 	cl, err := intent.Load(flagScenarioConfig)
@@ -407,6 +406,31 @@ func runScenariosCleanCmd(cmd *cobra.Command, args []string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("building scenario context: %w", err)
+	}
+
+	if flagScenarioAll {
+		ordered, err := topoSort(scenarios.All())
+		if err != nil {
+			return fmt.Errorf("dependency sort: %w", err)
+		}
+		var firstErr error
+		for i := len(ordered) - 1; i >= 0; i-- {
+			sc := ordered[i]
+			fmt.Fprintf(os.Stderr, "=== cleaning scenario %s ===\n", sc.Name())
+			if err := scenarios.Cleanup(sctx, sc); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: cleanup %s: %v\n", sc.Name(), err)
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+		return firstErr
+	}
+
+	name := args[0]
+	s := scenarios.Find(name)
+	if s == nil {
+		return fmt.Errorf("scenario %q not found", name)
 	}
 
 	return scenarios.Cleanup(sctx, s)
