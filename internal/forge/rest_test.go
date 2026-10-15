@@ -112,6 +112,38 @@ func TestForgeREST_FullLifecycle(t *testing.T) {
 	_ = clusterList
 }
 
+func TestForgeREST_UnregisterRESTByName_WrappedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case path == "/api/auth/login" && r.Method == http.MethodPost:
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "mock-jwt-token"})
+		case path == "/api/projects" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{
+					{"id": 42, "name": "azrbnkctl-poc-dual-interface"},
+				},
+			})
+		case path == "/api/projects/42/k8s/clusters" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"clusters": []map[string]any{
+					{"id": 99, "name": "poc-dual-interface", "project_id": 42},
+				},
+			})
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	creds := forge.RestCreds{Username: "admin", Password: "changeme"}
+	if err := forge.UnregisterRESTByName(context.Background(), srv.URL, "poc-dual-interface", creds); err != nil {
+		t.Fatalf("UnregisterRESTByName with wrapped JSON response failed: %v", err)
+	}
+}
+
 func stringsHasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
