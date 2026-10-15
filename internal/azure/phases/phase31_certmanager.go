@@ -58,6 +58,18 @@ func Phase31CertManager(ctx context.Context, cl *intent.Cluster, st *state.State
 		return fmt.Errorf("phase31: applying multus CRD: %w", err)
 	}
 
+	dsBytes, err := manifests.FS.ReadFile("multus/multus-daemonset-v4.2.4.yaml")
+	if err != nil {
+		return fmt.Errorf("phase31: reading multus daemonset: %w", err)
+	}
+	dsObjs, err := k8s.ParseYAMLStream(dsBytes)
+	if err != nil {
+		return fmt.Errorf("phase31: parsing multus daemonset: %w", err)
+	}
+	if err := applier.ApplyAll(ctx, dsObjs, true); err != nil {
+		return fmt.Errorf("phase31: applying multus daemonset: %w", err)
+	}
+
 	cs, err := k8s.NewClientsetFromConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("phase31: creating clientset: %w", err)

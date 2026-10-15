@@ -4,10 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/azure"
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
+	"github.com/JLCode-tech/azrbnkctl/internal/k8s"
 )
 
 // PhaseDownCluster tears down the AKS managed cluster and waits for completion.
@@ -25,6 +31,15 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	if clients == nil || azure.ShouldSkipAuth() {
 		fmt.Fprintln(os.Stderr, "[down] AZRBNKCTL_SKIP_AUTH=1: skipping real AKS deletion")
 		return nil
+	}
+
+	// Best-effort strip of F5 BNK CR finalizers before deleting the AKS cluster.
+	if st != nil {
+		if kcPath := st.KubeconfigPath(); kcPath != "" {
+			if _, err := os.Stat(kcPath); err == nil {
+				stripStuckFinalizers(ctx, kcPath)
+			}
+		}
 	}
 
 	poller, err := clients.ManagedClusters.BeginDelete(ctx, rgName, clusterName, nil)
@@ -125,4 +140,48 @@ func PhaseDownResourceGroup(ctx context.Context, cl *intent.Cluster, st *state.S
 
 	fmt.Fprintf(os.Stderr, "[down] Resource Group %s deleted\n", rgName)
 	return nil
+}
+
+// stripStuckFinalizers best-effort strips finalizers from F5 BNK CRs that
+// otherwise block namespace and cluster deletion when controller pods are gone.
+func stripStuckFinalizers(ctx context.Context, kubeconfigPath string) {
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cfg, err := k8s.BuildRESTConfigFromKubeconfig(kubeconfigPath, "")
+	if err != nil {
+		return
+	}
+	dyn, err := k8s.NewDynamicFromConfig(cfg)
+	if err != nil {
+		return
+	}
+
+	gvrs := []schema.GroupVersionResource{
+		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-vlans"},
+		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-staticroutes"},
+		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-egresses"},
+		{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-spk-snatpools"},
+		{Group: "k8s.f5.com", Version: "v1", Resource: "cneinstances"},
+	}
+	namespaces := []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance"}
+
+	for _, ns := range namespaces {
+		for _, gvr := range gvrs {
+			list, listErr := dyn.Resource(gvr).Namespace(ns).List(tctx, metav1.ListOptions{})
+			if listErr != nil || list == nil {
+				continue
+			}
+			for i := range list.Items {
+				item := list.Items[i]
+				if len(item.GetFinalizers()) == 0 {
+					continue
+				}
+				unstructured.RemoveNestedField(item.Object, "metadata", "finalizers")
+				if _, updErr := dyn.Resource(gvr).Namespace(ns).Update(tctx, &item, metav1.UpdateOptions{}); updErr == nil {
+					fmt.Fprintf(os.Stderr, "[down] stripped finalizers from %s %s/%s\n", gvr.Resource, ns, item.GetName())
+				}
+			}
+		}
+	}
 }

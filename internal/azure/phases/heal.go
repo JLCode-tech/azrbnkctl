@@ -33,7 +33,7 @@ import (
 
 const (
 	K8sTestNamespace                = "azrbnkctl-test"
-	InstanceNamespace               = "f5-bnk"
+	InstanceNamespace               = "f5-cne-system"
 	OperatorNamespace               = "f5-cne-core"
 	cneInstanceResource             = "cneinstances"
 	CNEControllerRBACYAMLPath       = "shared/cne-controller-rbac.yaml.tmpl"

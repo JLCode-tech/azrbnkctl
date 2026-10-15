@@ -18,9 +18,9 @@ func TestTunnelNetworkFollowsPattern(t *testing.T) {
 		opt     string
 		want    string
 	}{
-		{"external-only", intent.PatternExternalOnly, "", "ext-vlan"},
-		{"dual-interface", intent.PatternDualInterface, "", "int-vlan"},
-		{"host-device alias", intent.PatternHostDevice, "", "ext-vlan"},
+		{"external-only", intent.PatternExternalOnly, "", "external"},
+		{"dual-interface", intent.PatternDualInterface, "", "internal"},
+		{"host-device alias", intent.PatternHostDevice, "", "external"},
 		{"option wins", intent.PatternExternalOnly, "custom-vlan", "custom-vlan"},
 	}
 
@@ -38,7 +38,7 @@ func TestTunnelNetworkFollowsPattern(t *testing.T) {
 			}
 		})
 	}
-	if got := tunnelNetwork(&scenarios.Context{Options: map[string]string{}}); got != "ext-vlan" {
-		t.Errorf("nil cluster fallback = %q, want ext-vlan", got)
+	if got := tunnelNetwork(&scenarios.Context{Options: map[string]string{}}); got != "external" {
+		t.Errorf("nil cluster fallback = %q, want external", got)
 	}
 }

@@ -17,6 +17,9 @@ func Phase25Discovery(ctx context.Context, cl *intent.Cluster, st *state.State, 
 
 	extPCI := "4567:00:02.0"
 	intPCI := ""
+	if cl.Pattern == intent.PatternDualInterface {
+		intPCI = "4567:00:03.0"
+	}
 
 	st.Set("TMM_EXT_PCI", extPCI)
 	if intPCI != "" {

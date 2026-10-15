@@ -57,6 +57,45 @@ func scanBNK(ctx context.Context, kubeconfigPath, controllerNS string, timeout t
 	return bnkscan.Scan(sctx, dyn, cs, bnkscan.Options{ControllerNamespace: controllerNS})
 }
 
+// writeStatusBNK prints the BNK block of `azrbnkctl status`. Best-effort like
+// every other status section: a scan error is one line, not a failure.
+func writeStatusBNK(w io.Writer, idx *bnkscan.Index, scanErr error) {
+	if scanErr != nil {
+		fmt.Fprintf(w, "BNK API:\t(scan failed: %v)\n", scanErr)
+		return
+	}
+	rd := idx.Readiness()
+	gen := string(rd.Generation)
+	if len(idx.Groups) > 0 {
+		gen += " (CRD groups: " + strings.Join(idx.Groups, ", ") + ")"
+	}
+	fmt.Fprintf(w, "BNK API:\t%s\n", gen)
+	if rd.Generation == bnkscan.GenNone {
+		fmt.Fprintln(w, "BNK readiness:\tnot installed")
+		return
+	}
+	if rd.Generation == bnkscan.Gen24 || rd.Generation == bnkscan.GenMixed {
+		fmt.Fprintf(w, "Infra:\t%s Programmed\n", rd.Infras)
+	}
+	fmt.Fprintf(w, "Gateways:\t%s Accepted+Programmed\n", rd.Gateways)
+	if rd.Controller.Found {
+		fmt.Fprintf(w, "CNE controller:\t%s/%s %d/%d available\n", rd.Controller.Namespace, rd.Controller.Name, rd.Controller.Available, rd.Controller.Desired)
+	} else {
+		fmt.Fprintf(w, "CNE controller:\t%s/%s not found\n", rd.Controller.Namespace, rd.Controller.Name)
+	}
+	if len(idx.MCP) > 0 {
+		fmt.Fprintf(w, "MCP endpoints:\t%d\n", len(idx.MCP))
+	}
+	if rd.Ready {
+		fmt.Fprintln(w, "BNK readiness:\tready")
+	} else {
+		fmt.Fprintf(w, "BNK readiness:\tnot ready — %s\n", strings.Join(rd.Problems, "; "))
+	}
+	if advice := rd.MigrationAdvice(); advice != "" {
+		fmt.Fprintf(w, "BNK migration:\t%s\n", advice)
+	}
+}
+
 // bnkDoctorChecks renders the readiness verdict as doctor rows. Readiness
 // failures are errors; a 2.3 or mixed API generation and leftover 2.3 objects
 // are warnings that point at bnk upgrade / bnk migrate-2.4.

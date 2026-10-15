@@ -2,7 +2,7 @@ apiVersion: k8s.f5net.com/v3
 kind: F5SPKEgress
 metadata:
   name: default-egress
-  namespace: {{ .Namespace }}
+  namespace: f5-cne-system
 spec:
   snatType: SRC_TRANS_AUTOMAP
   pseudoCNIConfig:

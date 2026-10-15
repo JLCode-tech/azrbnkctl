@@ -104,11 +104,26 @@ func TestRenderVlansRoutes(t *testing.T) {
 	}
 
 	str := string(out)
+	if !strings.Contains(str, "name: external") {
+		t.Errorf("expected external VLAN, got:\n%s", str)
+	}
+	if !strings.Contains(str, "interfaces:\n  - \"1.1\"") {
+		t.Errorf("expected interface 1.1 for external VLAN, got:\n%s", str)
+	}
+	if !strings.Contains(str, "name: internal") {
+		t.Errorf("expected internal VLAN, got:\n%s", str)
+	}
+	if !strings.Contains(str, "interfaces:\n  - \"1.2\"") {
+		t.Errorf("expected interface 1.2 for internal VLAN, got:\n%s", str)
+	}
 	if !strings.Contains(str, "selfip_v4s:\n  - 10.0.17.10") {
 		t.Errorf("expected external self IP, got:\n%s", str)
 	}
 	if !strings.Contains(str, "destination: 10.0.17.1") {
 		t.Errorf("expected route-ext-gw, got:\n%s", str)
+	}
+	if !strings.Contains(str, "interface: external") {
+		t.Errorf("expected route-ext-gw interface: external, got:\n%s", str)
 	}
 	if !strings.Contains(str, "name: route-cluster-svcs") || !strings.Contains(str, "destination: 10.240.0.0") {
 		t.Errorf("expected route-cluster-svcs in output, got:\n%s", str)

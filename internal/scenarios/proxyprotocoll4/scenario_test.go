@@ -227,6 +227,7 @@ func TestVerifyCallOrder(t *testing.T) {
 // TestVerifyMissingJumphostState asserts the probe is skipped with a clear
 // failure when the jumphost state keys are absent.
 func TestVerifyMissingJumphostState(t *testing.T) {
+	t.Setenv("AZRBNKCTL_FORCE_SSH", "1")
 	var probed bool
 	deps := proxyprotocoll4.VerifyDeps{
 		WaitDeploymentAvailableFn: func(_ context.Context, _ *scenarios.Context, _, _ string, _ time.Duration) error { return nil },

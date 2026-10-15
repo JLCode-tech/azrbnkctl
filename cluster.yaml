@@ -3,7 +3,7 @@ kind: Cluster
 
 metadata:
   name: poc-dual-interface
-  subscriptionId: 00000000-0000-0000-0000-000000000000
+  subscriptionId: 3923f1da-92d6-4910-921c-7a9b3de99f5a
   location: eastus2
   resourceGroup: f5-bigip-ve-demo-rg
 

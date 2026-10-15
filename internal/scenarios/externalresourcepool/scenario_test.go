@@ -138,6 +138,7 @@ func TestManifestsRendered(t *testing.T) {
 // TestManifestsMissingBackendIP asserts Manifests errors clearly when the
 // jumphost ENI IP is absent from state.
 func TestManifestsMissingBackendIP(t *testing.T) {
+	t.Setenv("AZRBNKCTL_FORCE_SSH", "1")
 	st, err := state.Load(t.TempDir())
 	if err != nil {
 		t.Fatalf("state.Load: %v", err)

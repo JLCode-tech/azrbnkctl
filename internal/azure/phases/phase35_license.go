@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/azure"
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
@@ -56,6 +59,10 @@ func Phase35License(ctx context.Context, cl *intent.Cluster, st *state.State, _ 
 	}
 	fmt.Fprintln(os.Stderr, "[phase 35] licenses.k8s.f5net.com CRD established")
 
+	if cs, csErr := kubernetes.NewForConfig(cfg); csErr == nil {
+		purgeStaleCPCLSecrets(ctx, cs)
+	}
+
 	fmt.Fprintln(os.Stderr, "[phase 35] license: rendering and applying License CR")
 
 	rendered, err := render.RenderLicenseCR(jwtToken)
@@ -79,4 +86,24 @@ func Phase35License(ctx context.Context, cl *intent.Cluster, st *state.State, _ 
 
 	fmt.Fprintln(os.Stderr, "[phase 35] License CR applied OK")
 	return nil
+}
+
+// purgeStaleCPCLSecrets deletes any stale licensestatus or cpcl-config-secret
+// secrets in f5-utils and f5-cne-core before applying the License CR so CPCL
+// does not get stuck in a stale state across re-runs.
+func purgeStaleCPCLSecrets(ctx context.Context, client kubernetes.Interface) {
+	if client == nil {
+		return
+	}
+	for _, ns := range []string{"f5-utils", "f5-cne-core"} {
+		for _, secretName := range []string{"licensestatus", "cpcl-config-secret"} {
+			err := client.CoreV1().Secrets(ns).Delete(ctx, secretName, metav1.DeleteOptions{})
+			if err != nil && !apierrors.IsNotFound(err) {
+				continue
+			}
+			if err == nil {
+				fmt.Fprintf(os.Stderr, "[phase 35] purged stale CPCL secret %s/%s\n", ns, secretName)
+			}
+		}
+	}
 }

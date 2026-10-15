@@ -13,7 +13,7 @@ Apply one `EgressGateway` (with its `GatewaySettings`) and a pod's outbound traf
 
 ## How It Works
 
-1. **`GatewaySettings`**: Declares an `egressConfigs` entry configuring Automap SNAT on the external VLAN network (`ext-vlan-infra`).
+1. **`GatewaySettings`**: Declares an `egressConfigs` entry configuring Automap SNAT on the external VLAN network (`external`).
 2. **`EgressGateway`**: References the `GatewaySettings` and selects the captured namespace (`bnk-egress-demo`).
 3. **Firewall Policy**: `F5BigFwPolicy` attached to the `EgressGateway` via a `SecPolicy`. Drops `1.1.1.1` and allows/logs all other outbound destinations.
 

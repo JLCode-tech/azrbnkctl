@@ -44,7 +44,7 @@ func Phase36GatewayAPI(ctx context.Context, cl *intent.Cluster, st *state.State,
 				"name": gwcName,
 			},
 			"spec": map[string]interface{}{
-				"controllerName": "f5.com/f5-bnk-f5-cne-controller",
+				"controllerName": "f5.com/f5-cne-system-f5-cne-controller",
 				"description":    "F5 BIG-IP Kubernetes Gateway",
 			},
 		},
