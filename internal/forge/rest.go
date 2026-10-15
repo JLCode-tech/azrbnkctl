@@ -265,12 +265,21 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 }
 
 func restFindProjectByName(ctx context.Context, base, token, name string) (restProject, error) {
-	var list []restProject
-	if err := restGet(ctx, base+"/api/projects", token, &list); err != nil {
+	var raw json.RawMessage
+	if err := restGet(ctx, base+"/api/projects", token, &raw); err != nil {
 		var herr *restHTTPErr
 		if errors.As(err, &herr) && herr.StatusCode == http.StatusNotFound {
 			return restProject{}, fmt.Errorf("project %q: %w", name, os.ErrNotExist)
 		}
+		return restProject{}, fmt.Errorf("list projects: %w", err)
+	}
+	var list []restProject
+	var wrapped struct {
+		Projects []restProject `json:"projects"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Projects != nil {
+		list = wrapped.Projects
+	} else if err := json.Unmarshal(raw, &list); err != nil {
 		return restProject{}, fmt.Errorf("list projects: %w", err)
 	}
 	for _, p := range list {
@@ -354,8 +363,17 @@ func restCreateCluster(ctx context.Context, base, token string, projectID int, r
 
 func restFindClusterByName(ctx context.Context, base, token string, projectID int, name string) (restCluster, error) {
 	url := fmt.Sprintf("%s/api/projects/%d/k8s/clusters", base, projectID)
+	var raw json.RawMessage
+	if err := restGet(ctx, url, token, &raw); err != nil {
+		return restCluster{}, fmt.Errorf("list clusters: %w", err)
+	}
 	var list []restCluster
-	if err := restGet(ctx, url, token, &list); err != nil {
+	var wrapped struct {
+		Clusters []restCluster `json:"clusters"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Clusters != nil {
+		list = wrapped.Clusters
+	} else if err := json.Unmarshal(raw, &list); err != nil {
 		return restCluster{}, fmt.Errorf("list clusters: %w", err)
 	}
 	for _, c := range list {

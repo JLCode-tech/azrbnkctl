@@ -2,14 +2,35 @@ package phases
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/azure"
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
 )
+
+func TestIsAzureNotFound(t *testing.T) {
+	notFoundErr := &azcore.ResponseError{
+		StatusCode: http.StatusNotFound,
+		ErrorCode:  "ResourceNotFound",
+	}
+	if !isAzureNotFound(notFoundErr) {
+		t.Errorf("expected 404 ResourceNotFound to be classified as not found")
+	}
+
+	scopeLockedErr := &azcore.ResponseError{
+		StatusCode: http.StatusConflict,
+		ErrorCode:  "ScopeLocked",
+	}
+	if isAzureNotFound(scopeLockedErr) {
+		t.Errorf("expected 409 ScopeLocked to NOT be classified as not found")
+	}
+}
 
 func TestPhases_DryRun(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "azrbnkctl-phases-test-*")

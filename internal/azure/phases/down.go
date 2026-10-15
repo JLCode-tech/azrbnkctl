@@ -2,10 +2,14 @@ package phases
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -15,6 +19,27 @@ import (
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
 	"github.com/JLCode-tech/azrbnkctl/internal/k8s"
 )
+
+func isAzureNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) {
+		if respErr.StatusCode == http.StatusNotFound {
+			return true
+		}
+		switch respErr.ErrorCode {
+		case "ResourceNotFound", "ResourceGroupNotFound", "ParentResourceNotFound", "NotFound":
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "resourcenotfound") ||
+		strings.Contains(msg, "resourcegroupnotfound") ||
+		strings.Contains(msg, "status code: 404") ||
+		strings.Contains(msg, "http 404")
+}
 
 // PhaseDownCluster tears down the AKS managed cluster and waits for completion.
 func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, st *state.State, clients *azure.Clients, dryRun bool) error {
@@ -44,13 +69,16 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, st *state.State, 
 
 	poller, err := clients.ManagedClusters.BeginDelete(ctx, rgName, clusterName, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[down] AKS cluster %s delete call returned: %v (may already be gone)\n", clusterName, err)
-		return nil
+		if isAzureNotFound(err) {
+			fmt.Fprintf(os.Stderr, "[down] AKS cluster %s already absent\n", clusterName)
+			return nil
+		}
+		return fmt.Errorf("delete AKS cluster %s in %s: %w", clusterName, rgName, err)
 	}
 
 	_, err = poller.PollUntilDone(ctx, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[down] waiting for AKS delete: %v\n", err)
+	if err != nil && !isAzureNotFound(err) {
+		return fmt.Errorf("waiting for AKS cluster %s delete: %w", clusterName, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "[down] AKS cluster %s deleted\n", clusterName)
@@ -75,19 +103,31 @@ func PhaseDownNAT(ctx context.Context, cl *intent.Cluster, st *state.State, clie
 		return nil
 	}
 
-	if poller, err := clients.NatGateways.BeginDelete(ctx, rgName, natName, nil); err == nil {
-		_, _ = poller.PollUntilDone(ctx, nil)
+	if poller, err := clients.NatGateways.BeginDelete(ctx, rgName, natName, nil); err != nil {
+		if !isAzureNotFound(err) {
+			return fmt.Errorf("delete NAT Gateway %s in %s: %w", natName, rgName, err)
+		}
+	} else if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+		return fmt.Errorf("waiting for NAT Gateway %s delete: %w", natName, err)
 	}
 
 	if natPipName != "" {
-		if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rgName, natPipName, nil); err == nil {
-			_, _ = poller.PollUntilDone(ctx, nil)
+		if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rgName, natPipName, nil); err != nil {
+			if !isAzureNotFound(err) {
+				return fmt.Errorf("delete NAT Public IP %s in %s: %w", natPipName, rgName, err)
+			}
+		} else if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+			return fmt.Errorf("waiting for NAT Public IP %s delete: %w", natPipName, err)
 		}
 	}
 
 	if pipName != "" && pipName != natPipName {
-		if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rgName, pipName, nil); err == nil {
-			_, _ = poller.PollUntilDone(ctx, nil)
+		if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rgName, pipName, nil); err != nil {
+			if !isAzureNotFound(err) {
+				return fmt.Errorf("delete Public IP %s in %s: %w", pipName, rgName, err)
+			}
+		} else if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+			return fmt.Errorf("waiting for Public IP %s delete: %w", pipName, err)
 		}
 	}
 
@@ -114,12 +154,20 @@ func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, st *state.State,
 		return nil
 	}
 
-	if poller, err := clients.VirtualNetworks.BeginDelete(ctx, rgName, vnetName, nil); err == nil {
-		_, _ = poller.PollUntilDone(ctx, nil)
+	if poller, err := clients.VirtualNetworks.BeginDelete(ctx, rgName, vnetName, nil); err != nil {
+		if !isAzureNotFound(err) {
+			return fmt.Errorf("delete VNet %s in %s: %w", vnetName, rgName, err)
+		}
+	} else if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+		return fmt.Errorf("waiting for VNet %s delete: %w", vnetName, err)
 	}
 
-	if poller, err := clients.SecurityGroups.BeginDelete(ctx, rgName, nsgName, nil); err == nil {
-		_, _ = poller.PollUntilDone(ctx, nil)
+	if poller, err := clients.SecurityGroups.BeginDelete(ctx, rgName, nsgName, nil); err != nil {
+		if !isAzureNotFound(err) {
+			return fmt.Errorf("delete NSG %s in %s: %w", nsgName, rgName, err)
+		}
+	} else if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+		return fmt.Errorf("waiting for NSG %s delete: %w", nsgName, err)
 	}
 
 	return nil
@@ -146,8 +194,12 @@ func PhaseDownResourceGroup(ctx context.Context, cl *intent.Cluster, st *state.S
 		return nil
 	}
 
-	if poller, err := clients.ResourceGroups.BeginDelete(ctx, rgName, nil); err == nil {
-		_, _ = poller.PollUntilDone(ctx, nil)
+	if poller, err := clients.ResourceGroups.BeginDelete(ctx, rgName, nil); err != nil {
+		if !isAzureNotFound(err) {
+			return fmt.Errorf("delete Resource Group %s: %w", rgName, err)
+		}
+	} else if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+		return fmt.Errorf("waiting for Resource Group %s delete: %w", rgName, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "[down] Resource Group %s deleted\n", rgName)
