@@ -64,16 +64,9 @@ var (
 		return migrate.NewDynamicApplier(cfg)
 	}
 	// bnkUpgradeIdentity verifies and repairs the CNE controller Azure Managed
-	// Identity / Workload Identity after the rollout (phase 21): only for
-	// clusters azrbnkctl provisioned (AZURE_AKS_CLUSTER_NAME in state.env).
-	bnkUpgradeIdentity = func(ctx context.Context, cl *intent.Cluster, st *state.State, kubeconfigPath string) error {
-		clients, err := phases.NewClients(ctx, cl.Metadata.SubscriptionID, "")
-		if err != nil {
-			return fmt.Errorf("init azure clients: %w", err)
-		}
-		if err := phases.Phase21AKSCluster(ctx, cl, st, clients.Azure, false); err != nil {
-			return err
-		}
+	// Identity / Workload Identity ServiceAccount annotations and labels after
+	// the rollout: only for clusters azrbnkctl provisioned (AZURE_AKS_CLUSTER_NAME in state.env).
+	bnkUpgradeIdentity = func(ctx context.Context, _ *intent.Cluster, st *state.State, kubeconfigPath string) error {
 		return ensureAzureWorkloadIdentitySA(ctx, st, kubeconfigPath, flagBnkUpgradeNamespace)
 	}
 	bnkUpgradeDeps = func(kubeconfigPath, farKeyB64 string) (migrate.UpgradeDeps, error) {
@@ -469,6 +462,16 @@ func ensureAzureWorkloadIdentitySA(ctx context.Context, st *state.State, kubecon
 	if err != nil {
 		return err
 	}
+	return reconcileAzureWorkloadIdentitySA(ctx, cs, ns, clientID)
+}
+
+func reconcileAzureWorkloadIdentitySA(ctx context.Context, cs kubernetes.Interface, ns, clientID string) error {
+	if ns == "" {
+		ns = migrate.DefaultInstanceNamespace
+	}
+	if clientID == "" {
+		return nil
+	}
 	sa, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, render.CNEControllerServiceAccount, metav1.GetOptions{})
 	if err != nil {
 		return nil // non-fatal if SA is managed differently
@@ -480,6 +483,7 @@ func ensureAzureWorkloadIdentitySA(ctx context.Context, st *state.State, kubecon
 		sa.Labels = map[string]string{}
 	}
 	sa.Annotations["azure.workload.identity/client-id"] = clientID
+	sa.Annotations["azure.workload.identity/use"] = "true"
 	sa.Labels["azure.workload.identity/use"] = "true"
 	_, err = cs.CoreV1().ServiceAccounts(ns).Update(ctx, sa, metav1.UpdateOptions{})
 	return err

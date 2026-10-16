@@ -976,32 +976,35 @@ func TestBuildAiperfCmd_MooncakeDispatch(t *testing.T) {
 	}
 }
 
-func TestBuildAiperfCmd_NativeScenarioFlags(t *testing.T) {
+func TestBuildAiperfCmd_AgentXMvpScenario(t *testing.T) {
 	opts := jumphost.AiperfRunOptions{
 		ProbeOptions: jumphost.ProbeOptions{VIP: "10.0.10.100"},
 		Config: jumphost.AiperfConfig{
-			Model:               "Qwen/Qwen2.5-7B-Instruct",
+			Model:               "meta-llama/Llama-3.1-70B-Instruct",
 			Scenario:            "inferencex-agentx-mvp",
-			PublicDataset:       "custom_multi_turn",
-			RequestRate:         4,
+			PublicDataset:       "semianalysis_cc_traces_weka_with_subagents",
+			EndpointType:        "chat",
+			Streaming:           true,
 			UseServerTokenCount: true,
-			MaxContextLength:    32768,
-			UnsafeOverride:      []string{"dataset.conversation_num=30"},
+			BenchmarkDuration:   900,
+			RandomSeed:          20260707,
+			Concurrency:         16,
 		},
 	}
-
 	cmd := jumphost.BuildAiperfCmd(opts)
 
 	mustContain := []string{
-		"aiperf profile",
-		"-m 'Qwen/Qwen2.5-7B-Instruct'",
-		"-u 'http://10.0.10.100'",
 		"--scenario 'inferencex-agentx-mvp'",
-		"--public-dataset 'custom_multi_turn'",
-		"--request-rate 4",
+		"--public-dataset 'semianalysis_cc_traces_weka_with_subagents'",
+		"--endpoint-type 'chat'",
+		"--streaming",
 		"--use-server-token-count",
-		"--max-context-length 32768",
-		"--unsafe-override 'dataset.conversation_num=30'",
+		"--benchmark-duration 900",
+		"--random-seed 20260707",
+		"--concurrency 16",
+		"export AIPERF_DATASET_CONFIGURATION_TIMEOUT=1800",
+		"AIPERF_SERVICE_PROFILE_CONFIGURE_TIMEOUT=1800",
+		"AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID=1",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(cmd, want) {
@@ -1012,13 +1015,12 @@ func TestBuildAiperfCmd_NativeScenarioFlags(t *testing.T) {
 	mustNotContain := []string{
 		"--synthetic-input-tokens-mean",
 		"--output-tokens-mean",
-		"--tokenizer",
-		"--concurrency",
+		"--seq-dist",
 		"--request-count",
 	}
 	for _, bad := range mustNotContain {
 		if strings.Contains(cmd, bad) {
-			t.Errorf("buildAiperfCmd must NOT contain %q in native scenario mode; cmd=%q", bad, cmd)
+			t.Errorf("buildAiperfCmd must NOT contain %q for scenario; cmd=%q", bad, cmd)
 		}
 	}
 }
