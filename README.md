@@ -4,289 +4,458 @@
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-1.32--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![Azure AKS](https://img.shields.io/badge/Azure-AKS-0078d4?logo=microsoftazure&logoColor=white)
 [![CI](https://github.com/JLCode-tech/azrbnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/azrbnkctl/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go)](go.mod)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/JLCode-tech/azrbnkctl?label=download)](https://github.com/JLCode-tech/azrbnkctl/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A single-binary CLI to provision **F5 BIG-IP Next for Kubernetes (BNK)** on Azure Kubernetes Service (AKS), manage Accelerated Networking virtual functions for high-performance TMM data planes, and validate deployments with built-in end-to-end traffic scenarios.
-
-No Terraform. No host `kubectl`. **One binary, one intent file.**
+**Deploy, operate, and benchmark F5 BIG-IP Next for Kubernetes (BNK) on Azure AKS from a single binary.**  
+Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ---
 
-## Contents
+`azrbnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on Azure Kubernetes Service (AKS). From a single declarative `cluster.yaml`, it provisions the Azure VNet, NAT Gateway, AKS cluster, Accelerated Networking SR-IOV / secondary data-plane NICs, Multus CNI attachments, hugepages, and the full F5 BNK 2.4 software stack. It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **AI agent governance walkthroughs** (`examples/agentfoundry-demo/`).
 
-- [The `*bnkctl` Family](#the-bnkctl-family)
-- [Highlights](#highlights)
-- [Pinned Versions](#pinned-versions)
-- [Installation](#installation)
-- [Prerequisites](#prerequisites)
+---
+
+## Table of Contents
+
+- [Why azrbnkctl?](#why-azrbnkctl)
+- [System Architecture & Network Topology](#system-architecture--network-topology)
+- [AI Inference Benchmarking & Comparative Shootouts](#ai-inference-benchmarking--comparative-shootouts)
+- [15 Built-in Validation Scenarios](#15-built-in-validation-scenarios)
+- [Architecture & Protocol Demos](#architecture--protocol-demos)
 - [Quick Start](#quick-start)
-- [Data-Plane Patterns](#data-plane-patterns)
-- [Agentic Workflow](#agentic-workflow)
-- [BNK Forge Integration](#bnk-forge-integration)
-- [Command Reference](#command-reference)
-- [Repository Layout](#repository-layout)
-- [Contributing & License](#contributing--license)
+- [Interface Patterns](#interface-patterns)
+- [Pinned Ecosystem Versions](#pinned-ecosystem-versions)
+- [CLI Command Taxonomy](#cli-command-taxonomy)
+- [Documentation & The `*bnkctl` Family](#documentation--the-bnkctl-family)
 
 ---
 
-## The `*bnkctl` Family
+## Why azrbnkctl?
 
-`azrbnkctl` is part of the coordinated `*bnkctl` family of single-binary CLIs for deploying and operating F5 BIG-IP Next for Kubernetes across cloud, container, and bare-metal environments:
+Deploying F5 BIG-IP Next for Kubernetes (BNK) on Azure typically requires coordinating multiple infrastructure layers:
+- Azure VNet networking with dedicated system, public, external (`snet-external`), and internal (`snet-internal`) subnets, NAT Gateway, and secondary VMSS NICs.
+- AKS cluster lifecycle, OIDC identity issuer, and least-privilege Azure Workload Identity / Managed Identities.
+- Host-level Linux kernel tuning: 2MB hugepages reservation, Accelerated Networking SR-IOV VF / DPDK attachment, and Multus CNI daemonsets.
+- Cloud-native F5 control-plane lifecycle (FLO, CNE, IPAM controllers) and Kubernetes Gateway API resources (`gateway.k8s.f5.com`).
+- Live data-plane traffic validation inside private VNets via an in-VNet Azure jumphost VM without exposing workloads to the public internet.
 
-| Tool | Target Environment | Data Plane & Networking | Upstream Repo |
-|---|---|---|---|
-| **`azrbnkctl`** | **Azure AKS** | Azure Accelerated Networking (SR-IOV / DPDK), Multi-Networking | [JLCode-tech/azrbnkctl](https://github.com/JLCode-tech/azrbnkctl) |
-| **`awsbnkctl`** | **AWS EKS & EC2** | AWS Secondary ENIs (host-device / SR-IOV DPDK), Multus | [JLCode-tech/awsbnkctl](https://github.com/JLCode-tech/awsbnkctl) |
-| **`roksbnkctl`** | **IBM Cloud ROKS / OpenShift** | IBM Cloud VPC secondary subnets, Calico / OVN-K | [jgruberf5/roksbnkctl](https://github.com/jgruberf5/roksbnkctl) |
-| **`ocibnkctl`** | **Local OCI / k3s Containers** | Docker/Podman container netns virtio demo mode, Anycast BGP | [mwiget/ocibnkctl](https://github.com/mwiget/ocibnkctl) |
-| **`gkebnkctl`** | **GCP GKE** | GCP host-device secondary VPC interfaces, Multus | [JLCode-tech/gkebnkctl](https://github.com/JLCode-tech/gkebnkctl) |
-| **`bnkctl-index`** | **BNK Forge Catalog** | Curated catalog index packaging all `*bnkctl` runner modules | [mwiget/bnkctl-index](https://github.com/mwiget/bnkctl-index) |
+`azrbnkctl` consolidates this entire workflow into a **single, dependency-free binary**:
 
----
-
-## Highlights
-
-- **Deterministic Phased Provisioner** — 27 ordered, idempotent phases driven directly via the Azure Go ARM SDK (`armcontainerservice`, `armnetwork`, `armresources`). Azure resource tags serve as the single source of truth; local state caches accelerate subsequent runs.
-- **Embedded Kubernetes Engine (`k`)** — Native `client-go` dynamic Server-Side Apply (SSA) engine providing `get`, `apply`, `describe`, `delete`, `logs`, `exec`, and `port-forward` with zero host `kubectl` dependencies.
-- **Automated Node Preparation** — Automatic HugePages allocation (4Gi 2MB HugePages), kernel core dump configuration, and kubelet capacity advertisement.
-- **Native Azure Hardware Discovery** — Dynamic discovery of Azure Accelerated Networking SR-IOV virtual functions (`4567:00:02.0`), Subnet Gateways, and Self IPs.
-- **Agentic Workflow Built-In** — First-class AI pair-programming support with `azrbnkctl agent [gemini, claude, opencode, cursor]`, append-only operational journaling (`azrbnkctl journal`), and BNK Forge MCP integration.
-- **BNK Forge Integration** — Instant one-line cluster registration, project management, and real-time data plane topology visualization with `azrbnkctl forge register`.
-- **Cross-Platform Single Binary** — Statically compiled for Linux (amd64, arm64), macOS (Apple Silicon arm64, Intel amd64), and Windows, with SHA-256 verified in-place upgrades (`azrbnkctl self update`).
+- **Zero Prerequisites**: No Terraform, Helm, or external `kubectl` required on the host—everything is driven natively via Azure SDK for Go (`armcontainerservice`, `armnetwork`, `armresources`) and `client-go`.
+- **Deterministic State Machine**: 27 sequential phases (`00`–`60`) execute with full idempotency, resume safety, and explicit state verification.
+- **Built-in Diagnostics & Healing**: The `azrbnkctl bnk heal` command detects and automatically remediates 11 common Kubernetes plumbing issues (Multus token expiration, metrics-server bindings, TMM log streams, EndpointSlice RBAC, and Azure Workload Identity `controller-identity`).
+- **In-VNet Validation**: 15 built-in automated test scenarios validate L4/L7 routing, canary splits, gRPC streams, and AI inference directly inside the Azure VNet.
+- **Clean Teardown**: Tag-driven resource discovery ensures `azrbnkctl down -f cluster.yaml` destroys provisioned AKS and network resources while preserving the Azure Resource Group by default (unless `--delete-rg` is specified).
 
 ---
 
-## Pinned Versions
+## System Architecture & Network Topology
 
-| Component | Pinned Version / Range | Notes |
-|---|---|---|
-| **BNK** | `2.4.0` (also supports `2.3.x`) | Primary supported release |
-| **CNE Release Manifest** | `2.4.0` (Default) | Resolved dynamically from FAR registry |
-| **Kubernetes (AKS)** | `1.32` – `1.35` (Default: `1.34.10`) | Preflight gate rejects < 1.32 |
-| **Azure Go SDK** | `v6` (`armcontainerservice/v6`, `armnetwork/v6`) | Direct Azure Resource Manager API communication |
-| **cert-manager** | `v1.16.1` | Managed via embedded SSA installer |
-| **FLO Helm / CRDs** | `v2.30+` / `v2.21+` | Resolved and reconciled dynamically |
+`azrbnkctl` provisions an Azure VNet with dedicated network segmentation for management and high-performance TMM traffic:
 
----
+```mermaid
+flowchart LR
+    subgraph Mgmt["Management & Access"]
+        direction TB
+        CLI([Operator CLI]) -->|Azure Jumphost SSH| Jumphost["Azure Jumphost VM<br/>(10.0.17.200)"]
+        K8sAPI["AKS Control Plane<br/>(API Server)"]
+    end
 
-## Installation
+    subgraph BNK["F5 BNK Data Plane (snet-external: 10.0.17.0/24)"]
+        direction TB
+        VIP["Gateway VIP Pool<br/>(10.0.17.100 - .117)"]
+        TMM["TMM Microkernel<br/>(Accelerated Networking SR-IOV / DPDK)"]
+        VIP --> TMM
+    end
 
-### Option 1: Pre-Built Binary (Recommended)
+    subgraph Workloads["AKS Worker Nodes"]
+        direction TB
+        AppPods["Application Pods<br/>(HTTP / gRPC / L4)"]
+        ModelPods["Model Servers<br/>(vLLM / GPU Workers)"]
+    end
 
-Download the archive for your OS and architecture from [GitHub Releases](https://github.com/JLCode-tech/azrbnkctl/releases/latest), unpack, and install onto your `PATH`:
+    subgraph Egress["Outbound Egress"]
+        direction TB
+        NAT["Azure NAT Gateway"]
+        Internet([External APIs / Registries])
+        NAT --> Internet
+    end
 
-```bash
-# macOS (Apple Silicon)
-curl -fsSL https://github.com/JLCode-tech/azrbnkctl/releases/latest/download/azrbnkctl_darwin_arm64.tar.gz | tar -xz
-./azrbnkctl install
-
-# Linux (x86_64)
-curl -fsSL https://github.com/JLCode-tech/azrbnkctl/releases/latest/download/azrbnkctl_linux_amd64.tar.gz | tar -xz
-./azrbnkctl install
+    Jumphost -->|In-VNet Test Traffic| VIP
+    TMM -->|Line-Rate L4/L7 Routing| AppPods
+    TMM -->|Accelerated Inference Stream| ModelPods
+    AppPods -.->|Outbound Egress via VXLAN| TMM
+    TMM -.->|SNAT Automap| NAT
 ```
 
-Verify installation and upgrade in place at any time:
-```bash
-azrbnkctl version
-azrbnkctl self update
-```
-
-### Option 2: Go Install (Go 1.25+)
-
-```bash
-go install github.com/JLCode-tech/azrbnkctl/cmd/azrbnkctl@latest
-```
-
-### Option 3: Build from Source
-
-```bash
-git clone https://github.com/JLCode-tech/azrbnkctl.git
-cd azrbnkctl
-make build
-./bin/azrbnkctl --help
-```
+### Key Architectural Tenets
+1. **Isolated Data Path**: TMM attaches to dedicated Azure Accelerated Networking virtual functions (`4567:00:02.0`) and secondary interfaces on `snet-external` (`10.0.17.0/24`) and `snet-internal` (`10.0.18.0/24`) using Multus and DPDK. It bypasses the standard Linux kernel network stack for microsecond packet processing.
+2. **Deterministic IP Allocation**: VIPs live in a fixed pool (`.100` through `.117`), the Azure jumphost test client owns `.200`, and TMM self-IPs are dynamically discovered and reconciled across the data-plane subnets.
+3. **Transparent Outbound Egress**: Outbound pod traffic to external APIs or registries routes over a VXLAN tunnel (`vlan-int`) directly into TMM, where it is SNAT-translated via Automap to TMM's external self-IP and forwarded to the Azure NAT Gateway. Pod-to-VNet traffic remains local on the node.
+4. **Gateway API Native**: BNK 2.4 uses the modern `gateway.k8s.f5.com` API group (`Gateway`, `HTTPRoute`, `L4Route`, `SecPolicy`, `NetPolicy`, `EgressGateway`, and `Infra`), completely replacing legacy 2.3 CRDs.
 
 ---
 
-## Prerequisites
+## AI Inference Benchmarking & Comparative Shootouts
 
-- **Azure Subscription**: Active subscription with permissions for AKS, VNet, NAT Gateway, Public IPs, and NSG creation.
-- **Azure CLI (`az`)**: Installed and logged in (`az login`), or environment variables configured (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`).
-- **F5 FAR Registry Credentials**: F5 Automated Registry access token / pull secret (`far-secret`).
-- **F5 BNK License JWT**: Valid F5 Next license token.
+`azrbnkctl` embeds an AI performance benchmarking engine powered by NVIDIA's `aiperf`. It measures real-world GenAI latency and throughput from within the private Azure VNet data plane and synchronizes with **BNK Forge** for real-time visualization and comparative analysis.
+
+### Benchmarking Execution Flow
+
+```mermaid
+flowchart LR
+    subgraph Orchestration["Benchmark Orchestration"]
+        direction TB
+        UI["Forge Web UI (:3000)<br/>Dashboard & Sweeps"]
+        Server["Forge Server (:8000)<br/>Dispatcher & DB"]
+        Daemon["azrbnkctl daemon<br/>Agent Listener"]
+        UI --> Server
+        Server <--> Daemon
+    end
+
+    subgraph VNet["Private VNet Data Plane"]
+        direction TB
+        SSH["Direct SSH / NSG<br/>(Jumphost Tunnel)"]
+        JH["In-VNet Jumphost VM<br/>(aiperf Engine)"]
+        SSH --> JH
+    end
+
+    subgraph Targets["Inference Gateway Targets"]
+        direction TB
+        BNK["F5 BNK (TMM)"]
+        Envoy["Envoy Gateway"]
+        HAProxy["HAProxy Ingress"]
+        NodePort["Direct Pod IP"]
+    end
+
+    subgraph Backend["Inference Engine"]
+        LLM[("vLLM Model Server<br/>(GPU Worker)")]
+    end
+
+    Daemon -->|Secure Tunnel| SSH
+    JH -->|Generated Prompts| Targets
+    BNK -->|Inference Stream| LLM
+    Envoy -.->|Comparative Run| LLM
+    HAProxy -.->|Comparative Run| LLM
+    NodePort -.->|Baseline Run| LLM
+```
+
+### Built-in Smoke Presets (`--scenarios`)
+
+| Preset | Concurrency | Requests | ISL (Input) | OSL (Output) | Mode | Target Workload |
+|---|:---:|:---:|:---:|:---:|:---:|---|
+| `latency` | 1 | 50 | 512 | 128 | Stream | Single-user baseline TTFT without queue delay |
+| `throughput` | 32 | 500 | 512 | 128 | Batch | Maximum sustained token throughput under load |
+| `long-context` | 4 | 50 | 4096 | 512 | Stream | Memory bandwidth & KV cache expansion test |
+| `streaming` | 8 | 200 | 512 | 256 | Stream | Conversational multi-user SSE stream delivery |
+
+### Native Forge Scenarios (`--scenario`)
+
+For exhaustive evaluations and performance characterization, `azrbnkctl` supports 8 native synthetic Forge engines plus production trace replay:
+
+- **`baseline`**: Concurrency sweep across 50, 100, 150, 200 concurrent streams.
+- **`high-concurrency`**: Heavy prompt pairs up to 300 concurrency with 10k token prompts.
+- **`mixed-workload`**: Three-phase adaptive sweep (Warmup $\to$ Short ISL $\to$ Long ISL with prefix sharing).
+- **`multi-turn`**: Four-turn conversation simulation with progressively expanding shared prefix (500, 1000, 1500 tokens).
+- **`prefix-cache`**: Evaluates KV-cache hit rate and TTFT latency drop across 20 shared prompt pools (80% prefix overlap).
+- **`bimodal`**: Two-mode distribution modeling real traffic (70% short 300-token queries, 30% long 4000-token queries).
+- **`sustained-load`**: Endurance test running up to 2,500 requests per concurrency step.
+- **`burst-recovery`**: 5 rounds alternating between high-load bursts ($c=200$) and low-load probes ($c=25$) to measure queue recovery.
+- **`mooncake`**: Open-loop replay of production tool-agent traces with 0.80x time-dilation.
+
+### Multi-Proxy Shootouts (`--proxies`)
+
+Run head-to-head comparisons against Envoy, HAProxy, NGINX, and direct NodePort:
+
+```bash
+azrbnkctl benchmark run -f cluster.yaml \
+  --proxies f5-bnk,envoy,haproxy,nodeport \
+  --scenario baseline,prefix-cache \
+  --run-label proxy-shootout
+```
+
+### GenAI Metrics Captured
+- **TTFT (Time to First Token)**: p50, p90, p95, p99 percentiles.
+- **ITL (Inter-Token Latency)**: p50, p95, p99 percentiles for streaming chunks.
+- **Token Throughput**: Input, output, and aggregate tokens per second.
+- **Prefix Cache Hit Rate**: Real-time GPU KV cache hit ratio delta scraped from vLLM/EPP Prometheus metrics.
+
+*(Detailed documentation, Prometheus scrape configuration, and multi-proxy shootout workflows can be found in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).)*
+
+---
+
+## 15 Built-in Validation Scenarios
+
+`azrbnkctl` includes 15 automated validation scenarios covering L4-L7 protocols, hybrid routing, multi-tenancy, AI policies, and outbound egress:
+
+```mermaid
+flowchart LR
+    JH([Jumphost Test Runner])
+
+    subgraph L7["L7 Ingress"]
+        HTTP["http-routing-e2e (.100)"]
+        Split["http-traffic-split (.101)"]
+        GRPC["grpc-loadbalance (.108)"]
+    end
+
+    subgraph L4["L4 Transport"]
+        TCP["tcp-l4-loadbalance (.106)"]
+        UDP["udp-l4-loadbalance (.107)"]
+        PP["proxy-protocol-l4 (.103)"]
+    end
+
+    subgraph Hybrid["Hybrid & Multi-Tenancy"]
+        Ext["external-resource-pool (.102)"]
+        CWC["cluster-wide-watch (.105)"]
+        MultiVIP["multi-vip (.115-.117)"]
+    end
+
+    subgraph AI["AI Gateway"]
+        Tokens["ai-token-counting (.104)"]
+        Cache["ai-semantic-cache (.109)"]
+        Infer["ai-inference-e2e (.112)"]
+    end
+
+    subgraph Diagnostics["Egress & Diagnostics"]
+        SNAT["egress-snat (VXLAN)"]
+        Core["core-file-collection"]
+    end
+
+    JH -->|HTTP / gRPC| L7
+    JH -->|TCP / UDP| L4
+    JH -->|Hybrid Routing| Hybrid
+    JH -->|Inference Streams| AI
+    JH -->|Diagnostics| Diagnostics
+```
+
+| Category | Scenario | VIP | Verification Method | Status |
+|---|---|:---:|---|:---:|
+| **L7 Ingress** | `http-routing-e2e` | `.100` | Gateway API HTTPRoute routing to `http-echo` | Green |
+| | `http-traffic-split` | `.101` | Weighted canary traffic distribution (80/20 split) | Green |
+| | `grpc-loadbalance` | `.108` | gRPC stream load balancing against `kong/grpcbin` | Amber |
+| **L4 Transport** | `tcp-l4-loadbalance` | `.106` | Raw TCP proxying via L4Route to nginx marker pods | Green |
+| | `udp-l4-loadbalance` | `.107` | Stateless UDP datagram distribution to echo pods | Amber |
+| | `proxy-protocol-l4` | `.103` | PROXY protocol v1 header injection via NetPolicy/iRule | Green |
+| **Hybrid & Tenancy** | `external-resource-pool` | `.102` | Routing traffic to targets outside AKS (VMs / databases) | Green |
+| | `cluster-wide-watch` | `.105` | Dynamic tenant namespace routing via single CNE controller | Green |
+| | `cwc-admin-access` | – | Client cert + Bearer token auth on CWC admin endpoints | Green |
+| | `multi-vip` | `.115`–`.117` | Multi-VIP isolation and concurrent traffic on single NIC | Green |
+| **AI Gateway** | `ai-token-counting` | `.104` | Token quota metering and HTTP 503 overload enforcement | Amber |
+| | `ai-semantic-cache` | `.109` | Semantic similarity prompt cache hit verification | Amber |
+| | `ai-inference-e2e` | `.112` | End-to-end vLLM Llama-3-8B GPU inference (`--synthetic` for CPU) | Green |
+| **Security & Egress** | `egress-snat` | – | Transparent pod egress over VXLAN $\to$ TMM AUTOMAP SNAT | Green |
+| | `core-file-collection` | – | CoreMond daemon and host crash directory reconciliation | Green |
+
+*(Complete scenario details, traffic sequence diagrams, and VIP maps: [`docs/SCENARIOS.md`](docs/SCENARIOS.md).)*
+
+---
+
+## Architecture & Protocol Demos
+
+Run automated scenario suites and interactive architecture demonstrations with live verifications:
+
+```bash
+# List all registered scenarios
+azrbnkctl scenarios list
+
+# Run a live scenario or demo
+azrbnkctl scenarios run <scenario-name> -f cluster.yaml
+```
+
+### Featured: Azure AI Foundry Agent Tool Governance Demo (`examples/agentfoundry-demo/`)
+
+Demonstrates securing and governing Generative AI agent tool execution: an **Azure AI Foundry** agent invoking Model Context Protocol (MCP) tools through F5 BNK Gateway policies (L4 firewall rules, bearer token validation, tool-level access control, rate limiting, and MCP session persistence).
+
+```mermaid
+flowchart LR
+    subgraph Callers["AI Agents & Callers"]
+        Foundry([Azure AI Foundry Agent<br/>Private VNet Agent])
+        ExtCaller([External Caller<br/>Jumphost / Script])
+    end
+
+    subgraph Gateway["F5 BNK Security & Governance Gateway (VIP: 10.0.17.100)"]
+        direction TB
+        FW["1. L4 Firewall Policy<br/>Drop out-of-VNet traffic"]
+        Auth["2. Bearer Authentication<br/>Require authorized token"]
+        ToolGov["3. Tool Access Rule<br/>Block privileged tools for external"]
+        RateLimit["4. Rate Limiting iRule<br/>Enforce request burst limits"]
+        SessionPin["5. Session Persistence<br/>Pin MCP session to pod"]
+
+        FW --> Auth --> ToolGov --> RateLimit --> SessionPin
+    end
+
+    subgraph ToolBackend["Kubernetes Tool Cluster"]
+        MCPPod[("MCP Server Pod<br/>forecast, get_account_balance")]
+    end
+
+    subgraph Observability["Telemetry & Audit Stream"]
+        Loki["Loki Log Collector"]
+        Forge["BNK Forge Dashboard"]
+        Loki --> Forge
+    end
+
+    Foundry -->|forecast MSFT| FW
+    ExtCaller -->|forecast NVDA| FW
+    SessionPin -->|Authorized Tool Execution| MCPPod
+    Gateway -.->|Stream Audit Events| Loki
+```
+
+### Reference Architecture & Protocol Topologies
+
+- **`examples/agentfoundry-demo/`** (VIP `.100`): Full Azure AI Foundry + FastMCP tool governance pipeline with L4 firewall (`F5BigFwPolicy`), L7 rate limiting (`F5BigCneIrule`), MCP session persistence (`F5BigPersistenceProfile`), and Loki/Forge telemetry.
+- **`examples/demo-ai/`** (VIP `.112`): Multi-proxy AI inference shootout comparing F5 BNK against Envoy, HAProxy, and direct NodePort with vLLM prefix-cache benchmarking.
+- **`examples/egress/`**: Interactive outbound VXLAN egress and firewall policy toggle walkthrough (`EgressGateway` + `SecPolicy`).
+- **`examples/local-zone/`**: Telecom and low-latency edge protocol manifests covering Diameter (RFC 6733 over SCTP/TCP) and multiplexed HTTP/2 (`h2c`).
+
+*(All 15 scenarios and protocol architectures include detailed diagrams in [`docs/SCENARIOS.md`](docs/SCENARIOS.md).)*
 
 ---
 
 ## Quick Start
 
-### 1. Preflight Diagnostics
+### 1. Installation
+
+Download the pre-compiled static binary for your architecture from [GitHub Releases](https://github.com/JLCode-tech/azrbnkctl/releases):
+
 ```bash
-azrbnkctl doctor --subscription-id <azure-subscription-id>
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+curl -fsSL "https://github.com/JLCode-tech/azrbnkctl/releases/latest/download/azrbnkctl_${OS}_${ARCH}.tar.gz" | tar -xz
+./azrbnkctl install
+azrbnkctl version
 ```
 
-### 2. Configuration Validation
+*(You can upgrade anytime with `azrbnkctl self update`, or build locally via `make build` with Go 1.26+).*
+
+### 2. Configure Your Cluster
+
+Copy the reference example:
+
 ```bash
+cp -r examples/dual-interface my-cluster && cd my-cluster
+```
+
+Edit `cluster.yaml` to set your Azure Subscription ID, location, cluster name, and paths to your F5 FAR container archive and JWT licence token:
+
+```yaml
+apiVersion: azrbnkctl/v1
+kind: Cluster
+metadata:
+  name: bnk-prod-aks
+  subscriptionId: 00000000-0000-0000-0000-000000000000
+  location: eastus2
+  resourceGroup: azrbnkctl-bnk-prod-aks-rg
+pattern: dual-interface
+bnk:
+  manifestVersion: "2.4.0"
+  farArchive: "./keys/f5-far-auth-key.tgz"
+  jwt: "./keys/license.jwt"
+```
+
+### 3. Validate & Dry-Run
+
+```bash
+# Validate schema and intent locally (zero Azure API calls)
 azrbnkctl validate cluster.yaml
+
+# Perform a local dry-run plan (skipping Azure credentials check)
+AZRBNKCTL_SKIP_AUTH=1 azrbnkctl up -f cluster.yaml --dry-run
 ```
 
-### 3. Provision & Deploy
-```bash
-# Dry-run execution plan
-azrbnkctl up -f cluster.yaml --dry-run
+### 4. Deploy, Test & Destroy
 
-# Live deployment
+```bash
+# 1. Provision VNet, NAT Gateway, AKS cluster, TMM node pool, and BNK (~20 minutes)
 azrbnkctl up -f cluster.yaml
-```
 
-### 4. Day-2 Operations & Verification
-```bash
-# Embedded kubectl pass-through
-azrbnkctl k get pods -A
+# 2. Check cluster and BNK health
+azrbnkctl status -f cluster.yaml
+azrbnkctl doctor --backend k8s
 
-# Test DNS resolution & latency distribution
-azrbnkctl test dns --target f5.com
+# 3. Run validation scenarios
+azrbnkctl scenarios run http-routing-e2e -f cluster.yaml
 
-# Test egress connectivity
-azrbnkctl test egress -f cluster.yaml
-
-# Check BNK Forge status
-azrbnkctl forge status -f cluster.yaml
-```
-
-### 5. Teardown
-```bash
-# Teardown AKS cluster and managed resources (Resource Group is preserved by default)
-azrbnkctl down -f cluster.yaml
-
-# To also delete the Resource Group (e.g. clean dev teardowns)
-azrbnkctl down -f cluster.yaml --delete-rg
-```
-
-
----
-
-## Data-Plane Patterns
-
-```mermaid
-graph TD
-    Client[Client / Agent Workload] -->|snet-system 10.0.0.0/20| AKS[AKS System Nodes]
-    AKS -->|VxLAN 4789 / vlan-int| TMM[F5 TMM Pod]
-    TMM -->|Accelerated Networking VF 4567:00:02.0| ExtSubnet[snet-external 10.0.17.0/24]
-    ExtSubnet -->|Default Gateway 10.0.17.1| NATGW[Azure NAT Gateway]
-    NATGW -->|Public IP 20.213.166.229| Internet[Internet / Upstream APIs]
+# 4. Clean teardown (preserves Resource Group by default; add --delete-rg to remove RG)
+azrbnkctl down -f cluster.yaml --yes
 ```
 
 ---
 
-## Agentic Workflow
+## Interface Patterns
 
-`azrbnkctl` provides native tools for AI coding assistants and autonomous operators:
+`azrbnkctl` configures the TMM data-plane network interfaces according to your architecture:
 
-```bash
-# Launch AI agent session with context
-azrbnkctl agent gemini
-azrbnkctl agent claude
-
-# Operational Journaling
-azrbnkctl journal add "Provisioned TMM node pool and configured HugePages"
-azrbnkctl journal list
-
-# BNK Forge MCP Integration (http://localhost:8081/mcp/)
-azrbnkctl forge register -f cluster.yaml
-azrbnkctl forge status -f cluster.yaml
-```
-
-## BNK Forge Integration
-
-`azrbnkctl forge` (`azrbnkctl bnkforge` alias) connects AKS + BNK 2.4 clusters to **F5 BNK Forge** via MCP (`http://localhost:8081/mcp/`) and REST (`http://localhost:8000`):
-
-```bash
-# Register cluster and deploy bnk-forge-agent into f5-utils
-azrbnkctl forge register -f cluster.yaml
-
-# Check Forge registration and MCP reachability
-azrbnkctl forge status -f cluster.yaml
-
-# Run readiness & BNK 2.4 CRD scan
-azrbnkctl forge scan -f cluster.yaml
-
-# Stream live TMM governance and dataplane telemetry
-azrbnkctl forge telemetry -f cluster.yaml
-
-# Run aiperf LLM benchmarks from the Azure jumphost VM against the BNK VIP
-azrbnkctl forge benchmark -f cluster.yaml --scenarios latency,throughput
-```
-
-See [docs/FORGE_INTEGRATION.md](docs/FORGE_INTEGRATION.md) for full configuration and subcommand details.
+| Pattern | TMM Subnets Provisioned | Recommended Use Case |
+|---|---|---|
+| **`dual-interface`** *(Default)* | External (`snet-external` `10.0.17.0/24`) + Internal (`snet-internal` `10.0.18.0/24`) | Reference topology. Routes traffic to both K8s pod backends and off-cluster enterprise networks with Accelerated Networking SR-IOV. |
+| **`external-only`** | External (`snet-external` `10.0.17.0/24`) only | Single-arm ingress and transparent pod egress deployments. |
 
 ---
 
-## Command Reference
+## Pinned Ecosystem Versions
 
-All 24 top-level commands supported by `azrbnkctl`:
+All ecosystem components are pinned to validated, enterprise-tested versions:
 
-| Command | Description |
-| :--- | :--- |
-| `azrbnkctl init` | Generate a starter `cluster.yaml` intent file |
-| `azrbnkctl validate <cluster.yaml>` | Validate schema, subnet CIDRs, VM sizes, and Kubernetes version gates |
-| `azrbnkctl up -f <cluster.yaml>` | Provision Azure VNet, AKS cluster, TMM node pool, and BNK 2.4 stack (27 phases) |
-| `azrbnkctl down -f <cluster.yaml>` | Tear down AKS cluster and managed network resources in reverse dependency order |
-| `azrbnkctl status -f <cluster.yaml>` | Inspect Azure, AKS, BNK 2.4 (`Infra`, `CNEInstance`, TMM), and Forge status |
-| `azrbnkctl logs [tmm\|controller\|cwc\|flo]` | Stream BNK component or TMM governance logs (`--governance`) |
-| `azrbnkctl get <resource>` | Shorthand alias for `azrbnkctl k get` |
-| `azrbnkctl k <subcommand>` | Embedded `client-go` Kubernetes CLI (`get`, `apply`, `describe`, `delete`, `logs`, `exec`, `port-forward`) |
-| `azrbnkctl doctor` | Run Azure preflight checks and 10-point BNK cluster health diagnostics |
-| `azrbnkctl test [connectivity\|dns\|egress]` | Run data-plane connectivity, DNS latency, and egress SNAT verification |
-| `azrbnkctl scenarios [list\|run\|verify\|clean\|load]` | Deploy, verify, load-test, and clean end-to-end BNK 2.4 traffic & AI scenarios (`clean --all`) |
-| `azrbnkctl benchmark` | Run `aiperf` LLM benchmarks from the Azure jumphost VM against BNK VIPs |
-| `azrbnkctl bnk [status\|heal\|upgrade\|migrate-2.4\|mcp-session\|troubleshoot]` | Day-2 BNK 2.4 operations, self-healing (`--only controller-identity`), and 2.3→2.4 migration |
-| `azrbnkctl forge [register\|status\|unregister\|cleanup\|template\|scan\|telemetry\|benchmark]` | Manage BNK Forge cluster registration, templates, scanning, telemetry, and benchmarks |
-| `azrbnkctl bnkforge` | Backward-compatibility alias for `azrbnkctl forge` |
-| `azrbnkctl topology` | Discover and render live AKS node, SR-IOV VF, and BNK TMM topology |
-| `azrbnkctl manifest [list\|show\|probe]` | Inspect embedded BNK release manifests and probe FAR registry artifacts |
-| `azrbnkctl journal [add\|list\|show\|path\|clear]` | Manage the append-only operational journal |
-| `azrbnkctl agent [claude\|gemini\|opencode\|cursor]` | Launch an AI coding assistant preloaded with cluster context |
-| `azrbnkctl install [--dir <path>] [--force]` | Install the `azrbnkctl` binary into `$PATH` (`/usr/local/bin` or `~/.local/bin`) |
-| `azrbnkctl self [info\|update]` | Inspect binary metadata or perform SHA-256 verified in-place release updates |
-| `azrbnkctl version` | Print version, git commit, and build timestamp |
-| `azrbnkctl completion [bash\|zsh\|fish\|powershell]` | Generate shell completion scripts |
-| `azrbnkctl help [command]` | Display help for any command |
+| Component | Pinned Version | Config Key / Location | Notes |
+|---|:---:|---|---|
+| **F5 BNK Release** | `2.4.0` | `bnk.manifestVersion` | Default (`2.4.0-3.2882.0`). Supports 2.3.x overrides. |
+| **Kubernetes (AKS)** | `1.34.10` | `cluster.kubernetesVersion` | Validated across `1.32`–`1.35` (preflight rejects < 1.32). |
+| **cert-manager** | `v1.16.1` | Embedded upstream YAML | Applied via `client-go` Server-Side Apply without Helm. |
+| **FLO Chart** | `v2.30.0-0.5.2` | `manifest.KnownReleases` | Paired per release in embedded BNK BOM. |
+| **Go Runtime** | `1.26` | `go.mod` | Compiled with Azure SDK for Go (`armcontainerservice/v6`, `armnetwork/v6`). |
 
 ---
 
-## Repository Layout
+## CLI Command Taxonomy
 
-```text
-azrbnkctl/
-├── .github/                 # GitHub Actions CI/CD workflows and Dependabot
-├── cmd/                     # CLI entrypoint (azrbnkctl)
-├── internal/
-│   ├── azure/               # Azure ARM SDK clients and 27 lifecycle phases
-│   ├── bnkforge/            # BNK Forge MCP & REST registration logic
-│   ├── cli/                 # Cobra CLI commands (24 top-level commands)
-│   ├── doctor/              # Azure subscription and cluster preflight checks
-│   ├── forge/               # BNK Forge telemetry, scan, and benchmark client
-│   ├── intent/              # cluster.yaml schema parsing and validation
-│   ├── journal/             # Append-only operational journal
-│   ├── k8s/                 # Dynamic client-go SSA manifests, BNK 2.4 templates, and migration
-│   ├── netcalc/             # IPv4/IPv6 CIDR calculations
-│   ├── self/                # SHA-256 verified archive extraction and in-place self-update
-│   └── test/                # Network and DNS latency test runners
-├── docs/                    # Architecture, phase specifications, and runbooks
-├── examples/                # Declarative cluster definitions (dual-interface, external-only, agentfoundry-demo)
-├── hack/                    # 11-gate local CI runner (ci-local.sh)
-├── scripts/                 # Security and pre-commit automation scripts
-├── tools/                   # BNK Forge pack metadata
-├── Makefile                 # Development build and test automation targets
-└── cluster.yaml             # Default cluster definition
-```
+`azrbnkctl` provides 24 top-level commands organized into operational domains:
+
+- **Lifecycle**: `init`, `validate`, `up`, `down`, `status`, `doctor`, `topology`, `kubeconfig`, `version`.
+- **Validation Tests**: `test` (`connectivity`, `dns`, `egress`, `traffic`).
+- **Data Plane Scenarios**: `scenarios` (`list`, `run`, `clean`) — 15 automated validation scenarios.
+- **Kubernetes Passthrough**: `k` (`apply`, `delete`, `describe`, `exec`, `get`, `logs`, `port-forward`), aliases `get` and `logs`.
+- **BNK Runtime & Self-Healing**: `bnk` (`heal`, `resync`, `upgrade`, `migrate-2.4`, `mcp-session`), `manifest probe`.
+  - `bnk heal`: 11-point automated repair suite resolving `multus-token-watch`, `metrics-server`, `tmm-log-stream`, `pod-manager`, `cwc`, `dssm-probe`, `controller-endpointslices`, `controller-identity`, `tmm-k8s-routes`, `epp-namespaces`, and `test-namespace`.
+- **AI & Benchmarking**: `benchmark` (`setup`, `run`, `list`, `status`, `daemon`).
+- **Fleet & Forge**: `forge` (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`), alias `bnkforge`.
+- **Agentic Workflow**: `agent` (`gemini`, `claude`, `opencode`, `cursor`, `all`), `journal` (`add`, `list`).
+- **Installation & Maintenance**: `install`, `self` (`check`, `update`), `completion`, `help`.
+
+*(Complete command and flag reference: [`docs/COMMANDS.md`](docs/COMMANDS.md)).*
+
+---
+
+## Documentation & The `*bnkctl` Family
+
+### Deep-Dive Guides
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Phased state machine (27 phases), CNEInstance / Infra / GatewaySettings models, and Azure network design.
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — Comprehensive AI inference benchmarking guide, presets, native Forge scenarios, and proxy shootout recipes.
+- [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — In-depth breakdown of all 15 scenarios, assertions, and IP plans.
+- [`docs/COMMANDS.md`](docs/COMMANDS.md) — Full CLI flags and environment variables reference.
+- [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — Peer-read integration with BNK Forge GUI and telemetry schemas.
+- [`docs/UPGRADE-2.4.md`](docs/UPGRADE-2.4.md) — Step-by-step in-place upgrade from BNK 2.3 to 2.4.
+- [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) — Cross-cloud architectural alignment across the `*bnkctl` family.
+- [`docs/PHASES.md`](docs/PHASES.md) — Detailed reference of all 27 provisioning and teardown phases.
+- [`examples/`](examples/) — Ready-to-deploy reference manifests (`dual-interface`, `external-only`, `full-cluster`, `egress`, `demo-ai`, `agentfoundry-demo`).
+
+### The `*bnkctl` Multi-Cloud Family
+`azrbnkctl` is part of a unified family of single-binary CLIs bringing declarative F5 BNK management across clouds and on-premises environments:
+
+| Tool | Cloud / Platform | Data Plane Mechanism | Repository |
+|---|---|---|---|
+| **`awsbnkctl`** | AWS EKS | Secondary ENIs (host-device / SR-IOV DPDK), Multus | [JLCode-tech/awsbnkctl](https://github.com/JLCode-tech/awsbnkctl) |
+| **`gkebnkctl`** | GCP GKE | Secondary VPC interfaces (host-device), Multus | [JLCode-tech/gkebnkctl](https://github.com/JLCode-tech/gkebnkctl) |
+| **`azrbnkctl`** | Azure AKS | MANA / Accelerated Networking + Multus + Secondary NICs | [JLCode-tech/azrbnkctl](https://github.com/JLCode-tech/azrbnkctl) |
+| **`roksbnkctl`** | IBM Cloud ROKS / OpenShift | IBM Cloud VPC secondary subnets, Calico / OVN | [jgruberf5/roksbnkctl](https://github.com/jgruberf5/roksbnkctl) |
+| **`ocibnkctl`** | Local OCI / k3s | Container netns virtio demo mode, Anycast BGP | [mwiget/ocibnkctl](https://github.com/mwiget/ocibnkctl) |
+| **`bnkctl`** | Multi-Cloud Unified CLI | Unified F5 BNK lifecycle dispatcher | [JLCode-tech/bnkctl](https://github.com/JLCode-tech/bnkctl) |
+| **`bnkctl-index`** | BNK Forge Catalog | Unified Forge runner module index | [mwiget/bnkctl-index](https://github.com/mwiget/bnkctl-index) |
 
 ---
 
 ## Contributing & License
 
-Contributions are welcome! Please review [CONTRIBUTING.md](CONTRIBUTING.md) before submitting Pull Requests.
+Contributions are welcome! Please review [`CONTRIBUTING.md`](CONTRIBUTING.md) for local quality gates (`gofmt`, `go vet`, `staticcheck`, `gosec`, `go test -race`).
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE). © 2026 JLCode-tech.
