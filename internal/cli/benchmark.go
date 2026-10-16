@@ -1395,7 +1395,10 @@ func runNativeScenarioCollect(
 		fmt.Fprintf(os.Stderr, "\n── child: %s label=%s ──\n", child.VariantLabel, label)
 
 		cfg := child.Config
-		if cfg.SeqDist != "" {
+		if cfg.Scenario != "" {
+			fmt.Fprintf(os.Stderr, "→ Running aiperf (scenario=%q dataset=%q request-rate=%g max-context=%d)\n",
+				cfg.Scenario, cfg.PublicDataset, cfg.RequestRate, cfg.MaxContextLength)
+		} else if cfg.SeqDist != "" {
 			fmt.Fprintf(os.Stderr, "→ Running aiperf (concurrency=%d requests=%d seq-dist=%q stream=%v)\n",
 				cfg.Concurrency, cfg.NumRequests, cfg.SeqDist, cfg.Streaming)
 		} else {

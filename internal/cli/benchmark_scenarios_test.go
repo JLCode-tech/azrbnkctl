@@ -150,15 +150,16 @@ func TestScenario_ChildCounts(t *testing.T) {
 		key   string
 		count int
 	}{
-		{"baseline", 4},         // DEFAULT_SWEEP = {50,100,150,200}
-		{"high-concurrency", 4}, // HEAVY_CONC_ISL = 4 pairs
-		{"mixed-workload", 9},   // 1 warmup + 4 short + 4 long
-		{"multi-turn", 16},      // 4 turns × 4 sweep = 16
-		{"prefix-cache", 4},     // HEAVY_CONC_ISL = 4 pairs
-		{"bimodal", 4},          // DEFAULT_SWEEP
-		{"sustained-load", 5},   // sweep {50,100,150,200,250}
-		{"burst-recovery", 10},  // 5 rounds × 2 (burst+probe)
-		{"mooncake", 1},         // single trace variant
+		{"inferencex-agentx-mvp", 4}, // request-rate sweep {2,4,8,16}
+		{"baseline", 4},              // DEFAULT_SWEEP = {50,100,150,200}
+		{"high-concurrency", 4},      // HEAVY_CONC_ISL = 4 pairs
+		{"mixed-workload", 9},        // 1 warmup + 4 short + 4 long
+		{"multi-turn", 16},           // 4 turns × 4 sweep = 16
+		{"prefix-cache", 4},          // HEAVY_CONC_ISL = 4 pairs
+		{"bimodal", 4},               // DEFAULT_SWEEP
+		{"sustained-load", 5},        // sweep {50,100,150,200,250}
+		{"burst-recovery", 10},       // 5 rounds × 2 (burst+probe)
+		{"mooncake", 1},              // single trace variant
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {

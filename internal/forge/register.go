@@ -125,7 +125,7 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		return RegisterResult{}, fmt.Errorf("read existing link: %w", err)
 	}
 
-	// 1) create project
+	// 1) resolve or create project
 	env := req.Environment
 	if env == "" {
 		env = "dev"
@@ -139,6 +139,10 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		cloudProv = "azure"
 	}
 
+	var projectID int
+	var projectName string
+	createdProject := false
+
 	proj, err := c.CreateProject(ctx, CreateProjectRequest{
 		Name:                 req.ProjectName,
 		ProjectType:          projType,
@@ -150,28 +154,50 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		CredentialTemplateID: req.CredentialTemplateID,
 	})
 	if err != nil {
-		return RegisterResult{}, fmt.Errorf("create_project: %w", err)
+		// If project already exists (conflict), find and reuse it
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "already exists") || strings.Contains(errLower, "conflict") || strings.Contains(errLower, "409") {
+			if plist, lerr := c.ListProjects(ctx); lerr == nil {
+				for _, p := range plist.Projects {
+					if strings.EqualFold(p.Name, req.ProjectName) {
+						projectID = p.ID
+						projectName = p.Name
+						err = nil
+						break
+					}
+				}
+			}
+		}
+		if err != nil {
+			return RegisterResult{}, fmt.Errorf("create_project: %w", err)
+		}
+	} else {
+		projectID = proj.Project.ID
+		projectName = proj.Project.Name
+		createdProject = true
 	}
 
 	// 2) create cluster
 	cluster, err := c.CreateCluster(ctx, CreateClusterRequest{
-		ProjectID:     proj.Project.ID,
+		ProjectID:     projectID,
 		Name:          req.ClusterName,
 		CloudProvider: cloudProv,
 		Region:        req.Region,
 	}, req.Kubeconfig)
 	if err != nil {
-		// Cluster create failed — try to roll back the project so
-		// re-running doesn't leave half-states. Best-effort.
-		_ = c.DeleteProject(ctx, proj.Project.ID, true)
+		// Cluster create failed — try to roll back the project only if we created it.
+		// Re-running shouldn't delete pre-existing shared projects.
+		if createdProject {
+			_ = c.DeleteProject(ctx, projectID, true)
+		}
 		return RegisterResult{}, fmt.Errorf("create_cluster: %w", err)
 	}
 
 	link := &Link{
 		ForgeMCPURL:  c.URL(),
 		ForgeURL:     req.ForgeRESTURL,
-		ProjectID:    proj.Project.ID,
-		ProjectName:  proj.Project.Name,
+		ProjectID:    projectID,
+		ProjectName:  projectName,
 		ClusterID:    cluster.Cluster.ID,
 		ClusterName:  cluster.Cluster.Name,
 		RegisteredAt: time.Now().UTC(),

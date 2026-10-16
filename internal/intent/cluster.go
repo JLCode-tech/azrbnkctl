@@ -14,6 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/JLCode-tech/azrbnkctl/internal/manifest"
 	"github.com/JLCode-tech/azrbnkctl/internal/netcalc"
 )
 
@@ -100,7 +101,7 @@ type ClusterSpec struct {
 	TMMNodePool       NodePoolSpec `yaml:"tmmNodePool,omitempty"`
 }
 
-// BnkSpec defines the supply-chain credentials and BNK 2.3.x parameters.
+// BnkSpec defines the supply-chain credentials and BNK parameters.
 type BnkSpec struct {
 	FARArchive      string `yaml:"farArchive"`
 	JWT             string `yaml:"jwt"`
@@ -110,6 +111,64 @@ type BnkSpec struct {
 	TmmMemory       string `yaml:"tmmMemory,omitempty"`
 	TmmMtu          int    `yaml:"tmmMtu,omitempty"`
 	Telemetry       bool   `yaml:"telemetry,omitempty"`
+}
+
+// UnmarshalYAML accepts both integer (e.g. 1500) and numeric string (e.g. "1500")
+// values for tmmMtu while preserving strict field validation.
+func (b *BnkSpec) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			k := value.Content[i]
+			v := value.Content[i+1]
+			if k.Value == "tmmMtu" {
+				if v.Kind != yaml.ScalarNode {
+					return fmt.Errorf("tmmMtu must be an integer or string scalar, got kind %v", v.Kind)
+				}
+				s := strings.TrimSpace(v.Value)
+				if s != "" {
+					if _, err := strconv.Atoi(s); err != nil {
+						return fmt.Errorf("invalid tmmMtu %q: %w", v.Value, err)
+					}
+					v.Tag = "!!int"
+					v.Style = 0
+					v.Value = s
+				}
+			}
+		}
+	}
+	out, err := yaml.Marshal(value)
+	if err != nil {
+		return err
+	}
+	type rawBnkSpec BnkSpec
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	dec.KnownFields(true)
+	var raw rawBnkSpec
+	if err := dec.Decode(&raw); err != nil {
+		if errors.Is(err, io.EOF) {
+			*b = BnkSpec{}
+			return nil
+		}
+		return err
+	}
+	*b = BnkSpec(raw)
+	return nil
+}
+
+// Is24 reports whether the configured BNK manifest version uses the 2.4+ Gateway API / Infra CR model.
+func (b BnkSpec) Is24() bool {
+	v := strings.TrimPrefix(strings.TrimSpace(b.ManifestVersion), "v")
+	return !strings.HasPrefix(v, "2.3")
+}
+
+// FLOVersion resolves the FLO chart version paired with bnk.manifestVersion.
+func (c *Cluster) FLOVersion() string {
+	if c != nil && c.Bnk.ManifestVersion != "" {
+		if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
+			return chart
+		}
+	}
+	return manifest.DefaultFLOChart()
 }
 
 // EgressSpec defines egress/NAT settings.

@@ -84,6 +84,13 @@ var (
 	IRuleGVR              = schema.GroupVersionResource{Group: DataPlaneGroup, Version: "v1", Resource: "f5-big-cne-irules"}
 	CNEInstanceGVR        = schema.GroupVersionResource{Group: FLOGroup, Version: "v1", Resource: "cneinstances"}
 
+	// F5 CNF (Cloud-Native Network Functions) kinds.
+	DNSCacheGVR         = schema.GroupVersionResource{Group: DataPlaneGroup, Version: "v1", Resource: "f5-big-dns-caches"}
+	DNSAppGVR           = schema.GroupVersionResource{Group: DataPlaneGroup, Version: "v1", Resource: "f5-big-dns-apps"}
+	DNSZoneGVR          = schema.GroupVersionResource{Group: DataPlaneGroup, Version: "v1", Resource: "f5-big-dns-zones"}
+	CGNATPolicyGVR      = schema.GroupVersionResource{Group: DataPlaneGroup, Version: "v1", Resource: "f5-big-cnat-policies"}
+	DiameterEndpointGVR = schema.GroupVersionResource{Group: DataPlaneGroup, Version: "v1", Resource: "f5-diameter-endpoints"}
+
 	// Legacy 2.3 kinds, counted only.
 	BnkGatewayGVR = schema.GroupVersionResource{Group: DataPlaneGroup, Version: "v1", Resource: "f5-bnkgateways"}
 	BNKSecPolGVR  = schema.GroupVersionResource{Group: LegacyPolicyGroup, Version: "v1alpha1", Resource: "bnksecpolicies"}
@@ -269,6 +276,13 @@ type Index struct {
 	Gateways            []Object `json:"gateways"`
 	HTTPRoutes          []Object `json:"httpRoutes"`
 	PersistenceProfiles []Object `json:"persistenceProfiles"`
+
+	// F5 CNF resources (Cloud-Native Network Functions)
+	DNSCaches         []Object `json:"dnsCaches,omitempty"`
+	DNSApps           []Object `json:"dnsApps,omitempty"`
+	DNSZones          []Object `json:"dnsZones,omitempty"`
+	CGNATPolicies     []Object `json:"cgnatPolicies,omitempty"`
+	DiameterEndpoints []Object `json:"diameterEndpoints,omitempty"`
 
 	Controller Controller `json:"controller"`
 	TMM        TMM        `json:"tmm"`

@@ -155,6 +155,11 @@ var testGVRs = map[string]schema.GroupVersionResource{
 	"BNKNetPolicy":             BNKNetPolGVR,
 	"F5SPKVlan":                VlanGVR,
 	"F5SPKEgress":              EgressGVR,
+	"F5BigDnsCache":            DNSCacheGVR,
+	"F5BigDnsApp":              DNSAppGVR,
+	"F5BigDnsZone":             DNSZoneGVR,
+	"F5BigCnatPolicy":          CGNATPolicyGVR,
+	"F5DiameterEndpoint":       DiameterEndpointGVR,
 }
 
 func newFakeDynamic(t *testing.T, fixture string) *dynamicfake.FakeDynamicClient {
@@ -415,5 +420,35 @@ func TestReport_TextAndJSON(t *testing.T) {
 	}
 	if !strings.Contains(js.String(), `"generation": "2.4"`) || !strings.Contains(js.String(), `"mcpEndpoints"`) {
 		t.Errorf("json = %s", js.String())
+	}
+}
+
+func TestScan_CNFResources(t *testing.T) {
+	fixtureCNF := fixture24 + `
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: f5-big-dns-caches.k8s.f5net.com}
+spec: {group: k8s.f5net.com}
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5BigDnsCache
+metadata: {name: edge-resolver, namespace: default}
+spec: {}
+status:
+  conditions:
+  - {type: Programmed, status: "True"}
+`
+	dyn := newFakeDynamic(t, fixtureCNF)
+	idx, err := Scan(context.Background(), dyn, k8sfake.NewClientset(controllerDeployment(1)), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.DNSCaches) != 1 {
+		t.Fatalf("DNSCaches count = %d, want 1", len(idx.DNSCaches))
+	}
+	cache := idx.DNSCaches[0]
+	if cache.Name != "edge-resolver" || !cache.Ready {
+		t.Errorf("DNSCache = %+v", cache)
 	}
 }

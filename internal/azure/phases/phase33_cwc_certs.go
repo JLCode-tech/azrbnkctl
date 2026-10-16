@@ -10,7 +10,6 @@ import (
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
 	"github.com/JLCode-tech/azrbnkctl/internal/k8s"
-	"github.com/JLCode-tech/azrbnkctl/internal/k8s/manifests"
 )
 
 // Phase33CWCCerts creates ClusterIssuers and the ext-ca certificate.
@@ -32,17 +31,7 @@ func Phase33CWCCerts(ctx context.Context, cl *intent.Cluster, st *state.State, _
 		return fmt.Errorf("phase33: creating applier: %w", err)
 	}
 
-	issuerBytes, err := manifests.FS.ReadFile("static/04-issuers.yaml")
-	if err != nil {
-		return fmt.Errorf("phase33: reading 04-issuers.yaml: %w", err)
-	}
-
-	objs, err := k8s.ParseYAMLStream(issuerBytes)
-	if err != nil {
-		return fmt.Errorf("phase33: parsing issuers: %w", err)
-	}
-
-	if err := applier.ApplyAll(ctx, objs, true); err != nil {
+	if err := applyClusterIssuers(ctx, applier, cl); err != nil {
 		return fmt.Errorf("phase33: applying issuers: %w", err)
 	}
 

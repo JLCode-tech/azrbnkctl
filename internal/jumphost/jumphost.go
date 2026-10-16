@@ -15,7 +15,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,36 +30,12 @@ const DefaultProbePod = "test-probe"
 // DefaultProbeNamespace is the default namespace for the in-cluster probe pod.
 const DefaultProbeNamespace = "default"
 
-func ensureKubeconfigEnv(cmd *exec.Cmd) {
-	if os.Getenv("KUBECONFIG") != "" {
-		return
-	}
-	matches, _ := filepath.Glob(".azrbnkctl/*/kubeconfig")
-	if len(matches) > 0 {
-		cmd.Env = append(os.Environ(), "KUBECONFIG="+matches[0])
-	}
-}
-
 func isNamedPodRunning(pod, ns string) bool {
-	cmd := exec.Command("kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.phase}")
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return strings.TrimSpace(out.String()) == "Running"
+	return isNamedPodRunningInProcess(pod, ns)
 }
 
 func findTMMProbePod() string {
-	cmd := exec.Command("kubectl", "get", "pods", "-n", "f5-cne-system", "-l", "app=f5-tmm", "-o", "jsonpath={.items[0].metadata.name}")
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err == nil {
-		return strings.TrimSpace(out.String())
-	}
-	return ""
+	return findTMMProbePodInProcess()
 }
 
 func probePodName() string {
@@ -103,75 +78,36 @@ func probePodContainer() string {
 	return ""
 }
 
-// IsProbePodRunning checks if the in-cluster probe pod is available and running.
-func IsProbePodRunning(ctx context.Context) bool {
+// IsProbePodRunning checks if the in-cluster probe pod is available and running using in-process client-go.
+func IsProbePodRunning(_ context.Context) bool {
 	pod := probePodName()
 	ns := probePodNamespace()
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.phase}") // #nosec G204 -- controlled args
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return strings.TrimSpace(out.String()) == "Running"
+	return isNamedPodRunningInProcess(pod, ns)
 }
 
 // ProbePodIP returns the IP address of the in-cluster probe pod if running, or "" if unavailable.
 func ProbePodIP(ctx context.Context) string {
 	pod := probePodName()
 	ns := probePodNamespace()
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", pod, "-n", ns, "-o", "jsonpath={.status.podIP}") // #nosec G204 -- controlled args
-	ensureKubeconfigEnv(cmd)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out.String())
+	return probePodIPInProcess(ctx, pod, ns)
 }
 
 func execInProbe(ctx context.Context, cmdStr string) (string, error) {
-	pod := probePodName()
-	ns := probePodNamespace()
-	container := probePodContainer()
-	args := []string{"exec", "-n", ns}
-	if container != "" {
-		args = append(args, "-c", container)
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
 	}
-	args = append(args, pod, "--", "sh", "-c", cmdStr)
-	cmd := exec.CommandContext(ctx, "kubectl", args...) // #nosec G204 -- controlled args
-	ensureKubeconfigEnv(cmd)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return strings.TrimSpace(stdout.String()), fmt.Errorf("probe-exec: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return runner.Run(ctx, cmdStr, nil)
 }
 
 func execInProbeWithStdin(ctx context.Context, cmdStr string, stdin io.Reader) (string, error) {
-	pod := probePodName()
-	ns := probePodNamespace()
-	container := probePodContainer()
-	args := []string{"exec", "-i", "-n", ns}
-	if container != "" {
-		args = append(args, "-c", container)
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
 	}
-	args = append(args, pod, "--", "sh", "-c", cmdStr)
-	cmd := exec.CommandContext(ctx, "kubectl", args...) // #nosec G204 -- controlled args
-	ensureKubeconfigEnv(cmd)
-	if stdin != nil {
-		cmd.Stdin = stdin
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return strings.TrimSpace(stdout.String()), fmt.Errorf("probe-exec: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return runner.Run(ctx, cmdStr, stdin)
 }
 
 // ProbeOptions configures a jumphost curl probe run.

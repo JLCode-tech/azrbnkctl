@@ -111,14 +111,26 @@ func (t *translator) loadNADs() {
 	t.nads = list
 }
 
-// nadForInterface maps a 2.3 trunk interface ("1.1") to the NAD name.
+// nadForInterface maps a 2.3 trunk interface ("1.1" or Azure Socket Mode "0.2"/"0.3") to the NAD name.
 func (t *translator) nadForInterface(iface string) (string, bool) {
 	parts := strings.Split(iface, ".")
 	if len(parts) != 2 {
 		return "", false
 	}
 	n, err := strconv.Atoi(parts[1])
-	if err != nil || n < 1 || n > len(t.nads) {
+	if err != nil {
+		return "", false
+	}
+	// On Azure Socket Mode (net1=0.2, net2=0.3), interface 0.2 maps to the 1st NAD (index 0)
+	// and interface 0.3 maps to the 2nd NAD (index 1).
+	if parts[0] == "0" {
+		idx := n - 2
+		if idx < 0 || idx >= len(t.nads) {
+			return "", false
+		}
+		return t.nads[idx], true
+	}
+	if n < 1 || n > len(t.nads) {
 		return "", false
 	}
 	return t.nads[n-1], true

@@ -356,9 +356,10 @@ func mooncakeVariants() []forgeScenarioChild {
 // (higher TTFT) instead of hiding behind fewer requests as in a closed loop.
 // Mirror of benchmark_scenarios.py POISSON_RATES / POISSON_PREFIX_RATES.
 var (
-	poissonRates        = []float64{2, 4, 8, 16, 32}
-	poissonPrefixRates  = []float64{1, 2, 4, 8, 16}
-	poissonAgenticRates = []float64{8, 16, 24, 32}
+	poissonRates             = []float64{2, 4, 8, 16, 32}
+	poissonPrefixRates       = []float64{1, 2, 4, 8, 16}
+	poissonAgenticRates      = []float64{8, 16, 24, 32}
+	inferencexAgentxMvpRates = []float64{2, 4, 8, 16}
 )
 
 const (
@@ -424,11 +425,40 @@ func poissonAgenticVariants() []forgeScenarioChild {
 	})
 }
 
+// inferencexAgentxMvpVariants: SemiAnalysis InferenceX native multi-turn agentic
+// benchmark using aiperf's built-in --scenario inferencex-agentx-mvp and
+// --public-dataset custom_multi_turn across a request-rate sweep {2, 4, 8, 16}.
+func inferencexAgentxMvpVariants() []forgeScenarioChild {
+	out := make([]forgeScenarioChild, len(inferencexAgentxMvpRates))
+	for i, rate := range inferencexAgentxMvpRates {
+		out[i] = forgeScenarioChild{
+			VariantLabel: strconv.FormatFloat(rate, 'g', -1, 64) + "rps",
+			Config: jumphost.AiperfConfig{
+				Model:               syntheticModel,
+				Scenario:            "inferencex-agentx-mvp",
+				PublicDataset:       "custom_multi_turn",
+				RequestRate:         rate,
+				UseServerTokenCount: true,
+				MaxContextLength:    32768,
+				UnsafeOverride:      []string{"dataset.conversation_num=30"},
+			},
+		}
+	}
+	return out
+}
+
 // forgeScenarioRegistry is the ordered list of all scenario definitions.
 // Mirror of benchmark_scenarios.py SCENARIO_PRESETS.
 //
 // Keyed access: use forgeScenarioByKey.
 var forgeScenarioRegistry = []forgeScenario{
+	{
+		Key:           "inferencex-agentx-mvp",
+		Name:          "InferenceX AgentX MVP (Multi-Turn Agentic)",
+		Description:   "SemiAnalysis InferenceX native multi-turn agentic benchmark (--scenario inferencex-agentx-mvp --public-dataset custom_multi_turn), request-rate sweep {2,4,8,16} rps, 30 conversations, 32k max context, server token counts.",
+		Tags:          []string{"agentic", "multi-turn", "inferencex"},
+		buildVariants: inferencexAgentxMvpVariants,
+	},
 	{
 		Key:           "baseline",
 		Name:          "Baseline",
@@ -587,7 +617,9 @@ func expandForgeScenario(key string, base jumphost.AiperfConfig) ([]forgeScenari
 			if base.Model != "" {
 				cfg.Model = base.Model
 			}
-			if base.Tokenizer != "" {
+			// Native aiperf scenarios (e.g. inferencex-agentx-mvp with --use-server-token-count)
+			// omit client-side --tokenizer by default.
+			if base.Tokenizer != "" && cfg.Scenario == "" {
 				cfg.Tokenizer = base.Tokenizer
 			}
 		}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
@@ -65,12 +66,15 @@ var (
 	// bnkUpgradeIdentity verifies and repairs the CNE controller Azure Managed
 	// Identity / Workload Identity after the rollout (phase 21): only for
 	// clusters azrbnkctl provisioned (AZURE_AKS_CLUSTER_NAME in state.env).
-	bnkUpgradeIdentity = func(ctx context.Context, cl *intent.Cluster, st *state.State, _ string) error {
+	bnkUpgradeIdentity = func(ctx context.Context, cl *intent.Cluster, st *state.State, kubeconfigPath string) error {
 		clients, err := phases.NewClients(ctx, cl.Metadata.SubscriptionID, "")
 		if err != nil {
 			return fmt.Errorf("init azure clients: %w", err)
 		}
-		return phases.Phase21AKSCluster(ctx, cl, st, clients.Azure, false)
+		if err := phases.Phase21AKSCluster(ctx, cl, st, clients.Azure, false); err != nil {
+			return err
+		}
+		return ensureAzureWorkloadIdentitySA(ctx, st, kubeconfigPath, flagBnkUpgradeNamespace)
 	}
 	bnkUpgradeDeps = func(kubeconfigPath, farKeyB64 string) (migrate.UpgradeDeps, error) {
 		helm, err := phases.NewHelmInstaller(kubeconfigPath, farKeyB64)
@@ -438,4 +442,45 @@ var bnkUpgradeServiceCIDR = func(ctx context.Context, cl *intent.Cluster, flag s
 		return st.Get(phases.ServiceCIDRStateKey), ""
 	}
 	return "", ""
+}
+
+func ensureAzureWorkloadIdentitySA(ctx context.Context, st *state.State, kubeconfigPath, ns string) error {
+	if ns == "" {
+		ns = migrate.DefaultInstanceNamespace
+	}
+	clientID := ""
+	if st != nil {
+		clientID = st.Get("AZURE_CLIENT_ID")
+		if clientID == "" {
+			clientID = st.Get("AZURE_IDENTITY_CLIENT_ID")
+		}
+	}
+	if clientID == "" {
+		clientID = os.Getenv("AZURE_CLIENT_ID")
+	}
+	if clientID == "" {
+		return nil
+	}
+	cfg, err := k8s.BuildRESTConfig(kubeconfigPath)
+	if err != nil {
+		return err
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	sa, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, render.CNEControllerServiceAccount, metav1.GetOptions{})
+	if err != nil {
+		return nil // non-fatal if SA is managed differently
+	}
+	if sa.Annotations == nil {
+		sa.Annotations = map[string]string{}
+	}
+	if sa.Labels == nil {
+		sa.Labels = map[string]string{}
+	}
+	sa.Annotations["azure.workload.identity/client-id"] = clientID
+	sa.Labels["azure.workload.identity/use"] = "true"
+	_, err = cs.CoreV1().ServiceAccounts(ns).Update(ctx, sa, metav1.UpdateOptions{})
+	return err
 }

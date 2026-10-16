@@ -975,3 +975,50 @@ func TestBuildAiperfCmd_MooncakeDispatch(t *testing.T) {
 		t.Errorf("mooncake dispatch must produce python3.11 -c; cmd=%q", cmd)
 	}
 }
+
+func TestBuildAiperfCmd_NativeScenarioFlags(t *testing.T) {
+	opts := jumphost.AiperfRunOptions{
+		ProbeOptions: jumphost.ProbeOptions{VIP: "10.0.10.100"},
+		Config: jumphost.AiperfConfig{
+			Model:               "Qwen/Qwen2.5-7B-Instruct",
+			Scenario:            "inferencex-agentx-mvp",
+			PublicDataset:       "custom_multi_turn",
+			RequestRate:         4,
+			UseServerTokenCount: true,
+			MaxContextLength:    32768,
+			UnsafeOverride:      []string{"dataset.conversation_num=30"},
+		},
+	}
+
+	cmd := jumphost.BuildAiperfCmd(opts)
+
+	mustContain := []string{
+		"aiperf profile",
+		"-m 'Qwen/Qwen2.5-7B-Instruct'",
+		"-u 'http://10.0.10.100'",
+		"--scenario 'inferencex-agentx-mvp'",
+		"--public-dataset 'custom_multi_turn'",
+		"--request-rate 4",
+		"--use-server-token-count",
+		"--max-context-length 32768",
+		"--unsafe-override 'dataset.conversation_num=30'",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("buildAiperfCmd missing %q; cmd=%q", want, cmd)
+		}
+	}
+
+	mustNotContain := []string{
+		"--synthetic-input-tokens-mean",
+		"--output-tokens-mean",
+		"--tokenizer",
+		"--concurrency",
+		"--request-count",
+	}
+	for _, bad := range mustNotContain {
+		if strings.Contains(cmd, bad) {
+			t.Errorf("buildAiperfCmd must NOT contain %q in native scenario mode; cmd=%q", bad, cmd)
+		}
+	}
+}

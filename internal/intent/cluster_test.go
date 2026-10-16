@@ -113,3 +113,87 @@ bnk:
 		t.Errorf("got FAR path %q, want %q", c.Derived.FARArchiveFullPath, filepath.Join(tmpDir, "cne_pull_64.json"))
 	}
 }
+
+func TestLoadBytes_TmmMtuIntAndString(t *testing.T) {
+	intYAML := `
+apiVersion: azrbnkctl/v1
+kind: Cluster
+metadata:
+  name: mtu-int-cluster
+bnk:
+  farArchive: ./cne_pull_64.json
+  jwt: ./license.jwt
+  tmmMtu: 1460
+`
+	cInt, err := LoadBytes([]byte(intYAML), "/tmp")
+	if err != nil {
+		t.Fatalf("unexpected error loading int tmmMtu: %v", err)
+	}
+	if cInt.Bnk.TmmMtu != 1460 {
+		t.Errorf("got TmmMtu %d, want 1460", cInt.Bnk.TmmMtu)
+	}
+
+	strYAML := `
+apiVersion: azrbnkctl/v1
+kind: Cluster
+metadata:
+  name: mtu-str-cluster
+bnk:
+  farArchive: ./cne_pull_64.json
+  jwt: ./license.jwt
+  tmmMtu: "9000"
+`
+	cStr, err := LoadBytes([]byte(strYAML), "/tmp")
+	if err != nil {
+		t.Fatalf("unexpected error loading string tmmMtu: %v", err)
+	}
+	if cStr.Bnk.TmmMtu != 9000 {
+		t.Errorf("got TmmMtu %d, want 9000", cStr.Bnk.TmmMtu)
+	}
+
+	badYAML := `
+apiVersion: azrbnkctl/v1
+kind: Cluster
+metadata:
+  name: mtu-bad-cluster
+bnk:
+  farArchive: ./cne_pull_64.json
+  jwt: ./license.jwt
+  tmmMtu: "not-a-number"
+`
+	if _, err := LoadBytes([]byte(badYAML), "/tmp"); err == nil {
+		t.Fatal("expected error for non-numeric tmmMtu string, got nil")
+	}
+
+	unknownBnkYAML := `
+apiVersion: azrbnkctl/v1
+kind: Cluster
+metadata:
+  name: mtu-unk-cluster
+bnk:
+  farArchive: ./cne_pull_64.json
+  jwt: ./license.jwt
+  bogusField: true
+`
+	if _, err := LoadBytes([]byte(unknownBnkYAML), "/tmp"); err == nil {
+		t.Fatal("expected error for unknown field in bnk block, got nil")
+	}
+}
+
+func TestBnkIs24AndFLOVersion(t *testing.T) {
+	c := &Cluster{Bnk: BnkSpec{ManifestVersion: "2.4.0"}}
+	if !c.Bnk.Is24() {
+		t.Error("expected 2.4.0 to be Is24() == true")
+	}
+	if got := c.FLOVersion(); got != "v2.30.0-0.5.2" {
+		t.Errorf("got FLOVersion %q, want v2.30.0-0.5.2", got)
+	}
+
+	c23 := &Cluster{Bnk: BnkSpec{ManifestVersion: "2.3.3-3.2598.3-0.0.509"}}
+	if c23.Bnk.Is24() {
+		t.Error("expected 2.3.3 to be Is24() == false")
+	}
+	if got := c23.FLOVersion(); got != "v2.21.13-0.0.64" {
+		t.Errorf("got FLOVersion %q, want v2.21.13-0.0.64", got)
+	}
+}

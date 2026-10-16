@@ -187,23 +187,35 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	return out, nil
 }
 
+// ListProjectsResponse captures the list_projects MCP tool response.
+type ListProjectsResponse struct {
+	Projects []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"projects"`
+}
+
+// ListProjects returns all projects visible in forge.
+func (c *Client) ListProjects(ctx context.Context) (ListProjectsResponse, error) {
+	res, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	if err != nil {
+		return ListProjectsResponse{}, err
+	}
+	var out ListProjectsResponse
+	if err := json.Unmarshal([]byte(res.Text()), &out); err != nil {
+		return ListProjectsResponse{}, err
+	}
+	return out, nil
+}
+
 // FindProjectByName queries list_projects MCP tool and matches by name.
 func (c *Client) FindProjectByName(ctx context.Context, name string) (CreateProjectResponse, error) {
-	res, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	data, err := c.ListProjects(ctx)
 	if err != nil {
 		return CreateProjectResponse{}, err
 	}
-	var data struct {
-		Projects []struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
-		} `json:"projects"`
-	}
-	if err := json.Unmarshal([]byte(res.Text()), &data); err != nil {
-		return CreateProjectResponse{}, err
-	}
 	for _, p := range data.Projects {
-		if p.Name == name {
+		if strings.EqualFold(p.Name, name) {
 			var resp CreateProjectResponse
 			resp.Success = true
 			resp.Project.ID = p.ID

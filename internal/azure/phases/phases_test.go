@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/release"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/azure"
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
@@ -241,4 +243,96 @@ bnk:
 	if err := Phase50Egress(ctx, cl, st, clients, dryRun); err != nil {
 		t.Fatalf("Phase50 (BNK 2.4) failed: %v", err)
 	}
+}
+
+func TestRunFLOHelmInstall_InstallAndIdempotentUpgrade(t *testing.T) {
+	tmpDir := t.TempDir()
+	st, err := state.New(tmpDir)
+	if err != nil {
+		t.Fatalf("state.New: %v", err)
+	}
+
+	fake := &fakePhase32Helm{}
+	vals := map[string]interface{}{"containerPlatform": "Azure"}
+
+	// 1. Fresh install
+	if err := runFLOHelmInstall(context.Background(), fake, st, "v2.21.13-0.0.64", vals); err != nil {
+		t.Fatalf("fresh install failed: %v", err)
+	}
+	if fake.installCalls != 1 || fake.upgradeCalls != 0 {
+		t.Fatalf("expected 1 install, 0 upgrades; got %d, %d", fake.installCalls, fake.upgradeCalls)
+	}
+	if st.Get("FLO_VERSION") != "v2.21.13-0.0.64" {
+		t.Errorf("FLO_VERSION = %q, want v2.21.13-0.0.64", st.Get("FLO_VERSION"))
+	}
+
+	// 2. Idempotent re-run at same version + values -> no upgrade
+	if err := runFLOHelmInstall(context.Background(), fake, st, "v2.21.13-0.0.64", vals); err != nil {
+		t.Fatalf("idempotent re-run failed: %v", err)
+	}
+	if fake.installCalls != 1 || fake.upgradeCalls != 0 {
+		t.Fatalf("expected 1 install, 0 upgrades after idempotent run; got %d, %d", fake.installCalls, fake.upgradeCalls)
+	}
+
+	// 3. Version bump -> upgrade
+	if err := runFLOHelmInstall(context.Background(), fake, st, "v2.30.0-0.5.2", vals); err != nil {
+		t.Fatalf("upgrade run failed: %v", err)
+	}
+	if fake.upgradeCalls != 1 {
+		t.Fatalf("expected 1 upgrade; got %d", fake.upgradeCalls)
+	}
+	if st.Get("FLO_VERSION") != "v2.30.0-0.5.2" {
+		t.Errorf("FLO_VERSION = %q, want v2.30.0-0.5.2", st.Get("FLO_VERSION"))
+	}
+}
+
+type fakePhase32Helm struct {
+	installed    *release.Release
+	installCalls int
+	upgradeCalls int
+}
+
+func (f *fakePhase32Helm) List(_, _ string) ([]*release.Release, error) {
+	if f.installed == nil {
+		return nil, nil
+	}
+	return []*release.Release{f.installed}, nil
+}
+
+func (f *fakePhase32Helm) Install(name, ns string, ch *chart.Chart, vals map[string]interface{}) (*release.Release, error) {
+	f.installCalls++
+	f.installed = &release.Release{
+		Name:      name,
+		Namespace: ns,
+		Chart:     ch,
+		Config:    vals,
+		Info:      &release.Info{Status: release.StatusDeployed},
+	}
+	return f.installed, nil
+}
+
+func (f *fakePhase32Helm) Upgrade(name, ns string, ch *chart.Chart, vals map[string]interface{}) (*release.Release, error) {
+	f.upgradeCalls++
+	f.installed = &release.Release{
+		Name:      name,
+		Namespace: ns,
+		Chart:     ch,
+		Config:    vals,
+		Info:      &release.Info{Status: release.StatusDeployed},
+	}
+	return f.installed, nil
+}
+
+func (f *fakePhase32Helm) Uninstall(_, _ string) error {
+	f.installed = nil
+	return nil
+}
+
+func (f *fakePhase32Helm) PullAndLoad(_, version string) (*chart.Chart, error) {
+	return &chart.Chart{
+		Metadata: &chart.Metadata{
+			Name:    "f5-lifecycle-operator",
+			Version: version,
+		},
+	}, nil
 }
