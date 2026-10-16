@@ -21,6 +21,7 @@ func Phase00Preflight(ctx context.Context, cl *intent.Cluster, _ *state.State, c
 
 	var jwtToken string
 	if cl.Derived.JWTFullPath != "" {
+		// #nosec G304 -- JWTFullPath is user-configured license path from cluster.yaml
 		jwtBytes, err := os.ReadFile(cl.Derived.JWTFullPath)
 		if err == nil {
 			jwtToken = strings.TrimSpace(string(jwtBytes))

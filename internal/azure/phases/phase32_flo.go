@@ -69,6 +69,7 @@ func Phase32FLO(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azu
 
 			var jwtStr string
 			if cl.Derived.JWTFullPath != "" {
+				// #nosec G304 -- JWTFullPath is user-configured license path from cluster.yaml
 				if jwtBytes, jErr := os.ReadFile(cl.Derived.JWTFullPath); jErr == nil {
 					jwtStr = strings.TrimSpace(string(jwtBytes))
 				}
