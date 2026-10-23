@@ -44,7 +44,7 @@ jobs:
   goreleaser:
     name: GoReleaser
     needs: release-please
-    if: ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -101,7 +101,7 @@ jobs:
           COPY azrbnkctl /usr/local/bin/
           ENTRYPOINT ["azrbnkctl"]
           EOF
-          IMAGE="ghcr.io/jlcode-tech/azrbnkctl"
+          IMAGE="ghcr.io/jlcode-tech/azrbnkctl-cli"
           docker build \
             --label "org.opencontainers.image.source=https://github.com/JLCode-tech/azrbnkctl" \
             --label "org.opencontainers.image.description=Azure AKS cloud-pinned F5 BIG-IP Next for Kubernetes (BNK) & F5 BNK AI Service Plane CLI (part of the unified bnkctl family)" \
