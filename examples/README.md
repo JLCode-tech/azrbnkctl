@@ -10,8 +10,8 @@ Each directory holds a `cluster.yaml` that `azrbnkctl up` can provision, accompa
 | [`dual-interface`](dual-interface/) | `dual-interface` | ~$3.00 | Minimal dual-interface topology separating external ingress and internal east-west data paths. |
 | [`external-only`](external-only/) | `external-only` | ~$2.50 | Single external interface deployment where TMM reaches Kubernetes workloads directly across the Azure CNI overlay. |
 | [`egress`](egress/) | `external-only` | ~$2.50 | Outbound traffic steering and egress firewalling: pod traffic flips to a BNK-controlled path with AUTOMAP SNAT by applying one `EgressGateway`. |
-| [`agentfoundry-demo`](agentfoundry-demo/) | `dual-interface` | ~$4.00 | **AI Agent Tool Governance**: An Azure AI Foundry / Azure OpenAI agent executes FastMCP tool calls governed by BNK L4 firewall, Bearer authentication, and rate limiting. |
-| [`demo-ai`](demo-ai/) | `dual-interface` | ~$6.00 | High-performance AI Gateway: prompt token counting, semantic vector caching, and load-balanced LLM streaming (vLLM / simulator) on AKS. |
+| [`agentfoundry-demo`](agentfoundry-demo/) | `dual-interface` | ~$4.00 | **AI Agent Tool Governance**: An Azure AI Foundry / Azure OpenAI agent executes FastMCP tool calls governed by the **F5 BNK AI Service Plane**, L4 firewall, Bearer authentication, and rate limiting. |
+| [`demo-ai`](demo-ai/) | `dual-interface` | ~$6.00 | **F5 BNK AI Service Plane**: prompt token counting, semantic vector caching, and load-balanced LLM streaming (vLLM / simulator) on AKS. |
 | [`local-zone`](local-zone/) | none | $0 | Telco/edge reference manifests (HTTP/2, Diameter TCP 3868, SCTP 9000, and Egress) for Azure Local and Edge Zone deployments. |
 | [`local-zone-eastus2`](local-zone-eastus2/) | `dual-interface` | ~$3.00 | Validated edge cluster specification for `eastus2` Azure Local Zone deployment. |
 | [`local-zone-westus3`](local-zone-westus3/) | `dual-interface` | ~$3.00 | Edge cluster specification for `westus3` (Phoenix) Azure Edge Zone deployment. |
@@ -53,9 +53,8 @@ The Gateway VIP is an address in the external subnet assigned by the BNK control
 ## Rules Every `cluster.yaml` Follows
 
 1. **Supply-chain credentials are files you supply**:
-   - `bnk.farArchive`: Path to your F5 FAR container registry credentials JSON (e.g. `./keys/f5-far-auth-key.tgz` or `./cne_pull_64.json`).
-   - `bnk.jwt`: Path to your F5 BNK subscription JWT license file (e.g. `./keys/license.jwt`).
-   - Both are relative to the directory containing your `cluster.yaml` and are gitignored.
+   - Follow the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) to obtain your F5 BNK subscription JWT license (`license.jwt`) and F5 Artifact Registry (`repo.f5.com`) credentials (`bnk.farArchive` and `bnk.jwt`).
+   - Both paths are relative to the directory containing your `cluster.yaml` and are gitignored so credentials are never committed.
 2. **`metadata.name` uniquely tags resources**:
    - Tags every Azure resource (`azrbnkctl:<name>`) and names the state directory `.azrbnkctl/<name>/`.
 3. **Secrets never reside in YAML**:

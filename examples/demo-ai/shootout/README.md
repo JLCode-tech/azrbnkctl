@@ -1,9 +1,9 @@
 # Demo AI Shootout — Multi-Proxy Benchmark
 
-Automates bring-up, benchmarking, and teardown for the 3-way AI Gateway shootout:
-- **F5 BNK 2.4** (via Gateway API on VIP `.130`)
+Automates bring-up, benchmarking, and teardown for the 3-way AI inference proxy shootout:
+- **F5 BNK 2.4** (F5 BNK AI Service Plane via Gateway API on VIP `.130`)
 - **HAProxy Ingress**
-- **Envoy AI Gateway**
+- **Envoy**
 
 All three legs front the same backend inference engine to deliver an apples-to-apples performance comparison of TTFT, ITL, token throughput, and prefix caching hit rates.
 

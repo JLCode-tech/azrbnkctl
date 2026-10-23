@@ -30,10 +30,10 @@ All 24 top-level commands in `azrbnkctl` and their parity across the `*bnkctl` f
 | `k` | Embedded `client-go` Kubernetes CLI (`get`, `apply`, `describe`, `delete`, `logs`, `exec`, `port-forward`) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `doctor` | Preflight + live cluster readiness and heal diagnostics | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `test` | Data-plane verification (`connectivity`, `dns`, `egress`) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `scenarios` | End-to-end BNK 2.4 traffic & AI gateway scenarios (`list`, `run`, `verify`, `clean`, `load`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `scenarios` | End-to-end BNK 2.4 traffic & F5 BNK AI Service Plane scenarios (`list`, `run`, `verify`, `clean`, `load`) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `benchmark` | Run `aiperf` benchmarks from the in-VNet jumphost against BNK VIPs | ✓ | ✓ | — | — | ✓ |
 | `bnk` | Day-2 BNK operations (`status`, `heal`, `upgrade`, `migrate-2.4`, `mcp-session`, `troubleshoot`) | ✓ | ✓ | — | — | ✓ |
-| `forge` | BNK Forge integration (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `forge` | [BNK Forge](https://github.com/JLCode-tech/bnk-forge) integration (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `bnkforge` | Backward-compatibility alias for `forge` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `topology` | Discover and print live BNK data-plane / node / VF topology | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `manifest` | Inspect and probe F5 FAR release manifests (`list`, `show`, `probe`) | ✓ | ✓ | ✓ | ✓ | ✓ |
