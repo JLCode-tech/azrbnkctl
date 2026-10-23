@@ -6,10 +6,8 @@ title = "azrbnkctl gitleaks config"
 [extend]
 useDefault = true
 
-[[allowlists]]
-description = """
-internal manifests, test templates, and example configs containing public keys, placeholders, or dummy secrets.
-"""
+[allowlist]
+description = "internal manifests, test templates, and example configs containing public keys, placeholders, or dummy secrets."
 paths = [
   '''internal/k8s/manifests/templates/.*''',
   '''internal/forge/.*''',
