@@ -27,17 +27,17 @@ azrbnkctl scenarios clean http-routing-e2e -f cluster.yaml
 azrbnkctl scenarios clean --all -f cluster.yaml
 ```
 
-### Curated Demos
+### Curated Scenario Walkthroughs
 ```bash
-# List available interactive and protocol demos
-azrbnkctl demo list
+# List available validation scenarios
+azrbnkctl scenarios list
 
-# Run the HTTP/2 or Diameter protocol walkthrough
-azrbnkctl demo run http2 -f cluster.yaml
-azrbnkctl demo run diameter -f cluster.yaml
+# Run a scenario by name
+azrbnkctl scenarios run <name> -f cluster.yaml
+azrbnkctl scenarios run http-routing-e2e -f cluster.yaml
 
-# Clean up demo workloads
-azrbnkctl demo clean http2 -f cluster.yaml
+# Clean up scenario workloads
+azrbnkctl scenarios clean <name> -f cluster.yaml
 ```
 
 ### Day-2 Diagnostic Probes

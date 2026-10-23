@@ -1,13 +1,13 @@
 apiVersion: k8s.f5net.com/v1
 kind: F5SPKVlan
 metadata:
-  name: eth0
-  namespace: f5-bnk
+  name: external
+  namespace: f5-cne-system
 spec:
-  name: eth0
+  name: external
   category: external
   interfaces:
-  - "0.1"
+  - "1.1"
   internal: false
   mtu: {{ .TmmMtu }}
   prefixlen_v4: {{ .ExtPrefixLen }}
@@ -28,11 +28,11 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKVlan
 metadata:
   name: internal
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   name: internal
   interfaces:
-  - "0.1"
+  - "1.2"
   internal: true
   mtu: {{ .TmmMtu }}
   prefixlen_v4: {{ .IntPrefixLen }}
@@ -51,19 +51,19 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-ext-gw
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ExtGwIP }}
   prefixLen: 32
   type: interface
-  interface: eth0
+  interface: external
 {{- if .IntGwIP }}
 ---
 apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-int-gw
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .IntGwIP }}
   prefixLen: 32
@@ -74,7 +74,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-svcs
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ServiceCidrDest }}
   prefixLen: {{ .ServiceCidrPrefix }}
@@ -85,7 +85,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-pods
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .PodCidrDest }}
   prefixLen: {{ .PodCidrPrefix }}
@@ -96,7 +96,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-default-egress
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: 0.0.0.0
   prefixLen: 0
@@ -108,7 +108,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-svcs
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .ServiceCidrDest }}
   prefixLen: {{ .ServiceCidrPrefix }}
@@ -119,7 +119,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-cluster-pods
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: {{ .PodCidrDest }}
   prefixLen: {{ .PodCidrPrefix }}
@@ -130,7 +130,7 @@ apiVersion: k8s.f5net.com/v1
 kind: F5SPKStaticRoute
 metadata:
   name: route-default-egress
-  namespace: f5-bnk
+  namespace: f5-cne-system
 spec:
   destination: 0.0.0.0
   prefixLen: 0

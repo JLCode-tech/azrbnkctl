@@ -51,6 +51,8 @@ goreleaser-snapshot:
 	    -w /work \
 	    $(GORELEASER_IMAGE) release --snapshot --clean
 
+release: stamp-changelog goreleaser-snapshot
+
 staticcheck:
 	go tool staticcheck ./...
 
@@ -59,9 +61,8 @@ lint:
 	go vet ./...
 	$(MAKE) staticcheck
 
-ci-local: lint
-	go test -race ./...
-	go build ./...
+ci-local:
+	./hack/ci-local.sh
 
 pre-commit-install:
 	ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit && echo "Pre-commit hook installed."

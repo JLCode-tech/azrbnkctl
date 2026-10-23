@@ -34,10 +34,10 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 	}
 
 	var nads []string
-	if extPCI != "" {
+	if extPCI != "" || cl.Pattern == intent.PatternDualInterface || cl.Pattern == intent.PatternExternalOnly || cl.Pattern == intent.PatternHostDevice {
 		nads = append(nads, "tmm-ext")
 	}
-	if intPCI != "" {
+	if intPCI != "" || cl.Pattern == intent.PatternDualInterface {
 		nads = append(nads, "tmm-int")
 	}
 
@@ -50,6 +50,7 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		ExtPCI:             extPCI,
 		IntPCI:             intPCI,
 		Telemetry:          cl.Bnk.Telemetry,
+		AIGateway:          cl.Bnk.AIGateway != nil && cl.Bnk.AIGateway.Enabled,
 		PalCpuSet:          palCpuSet,
 		NetworkAttachments: nads,
 		SkipNics:           "eth0",
@@ -83,8 +84,8 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		}
 	}
 
-	// Apply NetworkAttachmentDefinitions in f5-bnk and default namespaces
-	for _, ns := range []string{"f5-bnk", "default"} {
+	// Apply NetworkAttachmentDefinitions in f5-cne-system and default namespaces
+	for _, ns := range []string{"f5-cne-system", "default"} {
 		nadBytes, err := render.RenderNADs(render.NADsData{
 			Namespace: ns,
 			ExtPCI:    extPCI,
@@ -99,6 +100,17 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		}
 		if err := applier.ApplyAll(ctx, nadObjs, true); err != nil {
 			return fmt.Errorf("phase34: applying NADs in %s: %w", ns, err)
+		}
+	}
+
+	// Apply supplemental RBAC for cne-controller and cwc (EndpointSlices, NADs, gateway.k8s.f5.com, k8s.f5.com)
+	if rbacTmpl, err := manifests.FS.ReadFile(CNEControllerRBACYAMLPath); err == nil {
+		if rbacBytes, err := render.RenderCNEControllerRBAC(rbacTmpl, cl); err == nil {
+			if rbacObjs, err := k8s.ParseYAMLStream(rbacBytes); err == nil {
+				if err := applier.ApplyAll(ctx, rbacObjs, true); err != nil {
+					return fmt.Errorf("phase34: applying cne-controller RBAC: %w", err)
+				}
+			}
 		}
 	}
 

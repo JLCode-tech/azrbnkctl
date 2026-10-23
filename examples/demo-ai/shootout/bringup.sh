@@ -58,7 +58,7 @@ spec:
       ipamRefs:
       - name: listener-pool
       networkRefs:
-      - name: ext-vlan-infra
+      - name: external
       sourceNATConfig:
         type: Automap
 ---

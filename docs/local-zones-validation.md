@@ -50,7 +50,7 @@ When authoring custom manifests for Azure Local or Edge Zones:
 
    # CORRECT:
    networkRefs:
-   - name: ext-vlan-infra # or external
+   - name: external
    ```
 
 2. **Always include Automap SNAT on Edge Listeners**:
@@ -66,7 +66,7 @@ When authoring custom manifests for Azure Local or Edge Zones:
          ipamRefs:
          - name: listener-pool
          networkRefs:
-         - name: ext-vlan-infra
+         - name: external
          sourceNATConfig:
            type: Automap
    ```

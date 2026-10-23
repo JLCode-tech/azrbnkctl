@@ -24,7 +24,7 @@ import (
 
 // Phase30Namespaces applies initial Kubernetes namespaces and the image pull secret.
 func Phase30Namespaces(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azure.Clients, dryRun bool) error {
-	fmt.Fprintln(os.Stderr, "[phase 30] namespaces: creating f5-bnk, f5-utils, egress-demo and image pull secret")
+	fmt.Fprintln(os.Stderr, "[phase 30] namespaces: creating cert-manager, f5-cne-core, f5-cne-system, f5-bnk-instance, f5-utils, egress-demo and image pull secret")
 
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "[phase 30] [dry-run] would apply namespaces and far-secret")
@@ -55,13 +55,28 @@ func Phase30Namespaces(ctx context.Context, cl *intent.Cluster, st *state.State,
 		return fmt.Errorf("phase30: applying namespaces: %w", err)
 	}
 
+	if cl != nil && cl.Egress.Namespace != "" && cl.Egress.Namespace != "egress-demo" {
+		nsObj := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Namespace",
+				"metadata": map[string]interface{}{
+					"name": cl.Egress.Namespace,
+				},
+			},
+		}
+		if _, err := applier.Apply(ctx, nsObj, true); err != nil {
+			return fmt.Errorf("phase30: applying custom egress namespace %s: %w", cl.Egress.Namespace, err)
+		}
+	}
+
 	// Apply far-secret if provided
 	if cl.Derived.FARArchiveFullPath != "" {
 		dockerCfgJSON, err := extractAndBuildDockerConfig(cl.Derived.FARArchiveFullPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[phase 30] warn: extracting FAR archive: %v\n", err)
 		} else {
-			targetNamespaces := []string{"f5-bnk", "f5-utils", "default"}
+			targetNamespaces := []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "default"}
 			for _, ns := range targetNamespaces {
 				secretObj := &unstructured.Unstructured{
 					Object: map[string]interface{}{
@@ -86,7 +101,7 @@ func Phase30Namespaces(ctx context.Context, cl *intent.Cluster, st *state.State,
 		}
 	}
 
-	// Apply CoreDNS custom configuration for f5-bnk StatefulSet endpoint resolution
+	// Apply CoreDNS custom configuration for F5 BNK StatefulSet endpoint resolution
 	if err := applyCoreDNSCustomConfig(ctx, applier); err != nil {
 		fmt.Fprintf(os.Stderr, "[phase 30] warn: applying coredns-custom configmap: %v\n", err)
 	}
@@ -106,14 +121,15 @@ func applyCoreDNSCustomConfig(ctx context.Context, applier *k8s.Applier) error {
 				"namespace": "kube-system",
 			},
 			"data": map[string]interface{}{
-				"f5-bnk.server": "f5-bnk.svc.cluster.local:53 {\n    errors\n    cache 30\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n        pods insecure\n        fallthrough in-addr.arpa ip6.arpa\n        endpoint_pod_names\n    }\n}\n",
+				"f5-cne-core.server":   "f5-cne-core.svc.cluster.local:53 {\n    errors\n    cache 30\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n        pods insecure\n        fallthrough in-addr.arpa ip6.arpa\n        endpoint_pod_names\n    }\n}\n",
+				"f5-cne-system.server": "f5-cne-system.svc.cluster.local:53 {\n    errors\n    cache 30\n    kubernetes cluster.local in-addr.arpa ip6.arpa {\n        pods insecure\n        fallthrough in-addr.arpa ip6.arpa\n        endpoint_pod_names\n    }\n}\n",
 			},
 		},
 	}
 	if _, err := applier.Apply(ctx, cmObj, true); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr, "[phase 30] coredns-custom ConfigMap applied to kube-system (endpoint_pod_names enabled for f5-bnk)")
+	fmt.Fprintln(os.Stderr, "[phase 30] coredns-custom ConfigMap applied to kube-system (endpoint_pod_names enabled for f5-cne-core and f5-cne-system)")
 	return nil
 }
 

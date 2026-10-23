@@ -11,16 +11,19 @@ import (
 
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/release"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/yaml"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
 	"github.com/JLCode-tech/azrbnkctl/internal/k8s/migrate"
+	"github.com/JLCode-tech/azrbnkctl/internal/k8s/render"
 )
 
 // A small 2.3 cluster: CNEInstance, one VLAN, the BNK GatewayClass, one
@@ -407,5 +410,31 @@ func TestResolveClusterPath(t *testing.T) {
 	}
 	if got := resolveClusterPath("", "far.json"); got != "far.json" {
 		t.Errorf("no source = %q", got)
+	}
+}
+
+func TestReconcileAzureWorkloadIdentitySA(t *testing.T) {
+	cs := k8sfake.NewClientset(&corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      render.CNEControllerServiceAccount,
+			Namespace: migrate.DefaultInstanceNamespace,
+		},
+	})
+	const wantClientID = "11111111-2222-3333-4444-555555555555"
+	if err := reconcileAzureWorkloadIdentitySA(context.Background(), cs, "", wantClientID); err != nil {
+		t.Fatalf("reconcileAzureWorkloadIdentitySA: %v", err)
+	}
+	sa, err := cs.CoreV1().ServiceAccounts(migrate.DefaultInstanceNamespace).Get(context.Background(), render.CNEControllerServiceAccount, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get ServiceAccount: %v", err)
+	}
+	if got := sa.Annotations["azure.workload.identity/client-id"]; got != wantClientID {
+		t.Errorf("client-id annotation = %q, want %q", got, wantClientID)
+	}
+	if got := sa.Annotations["azure.workload.identity/use"]; got != "true" {
+		t.Errorf("use annotation = %q, want \"true\"", got)
+	}
+	if got := sa.Labels["azure.workload.identity/use"]; got != "true" {
+		t.Errorf("use label = %q, want \"true\"", got)
 	}
 }

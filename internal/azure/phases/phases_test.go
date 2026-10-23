@@ -2,14 +2,37 @@ package phases
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/release"
 
 	"github.com/JLCode-tech/azrbnkctl/internal/azure"
 	"github.com/JLCode-tech/azrbnkctl/internal/azure/state"
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
 )
+
+func TestIsAzureNotFound(t *testing.T) {
+	notFoundErr := &azcore.ResponseError{
+		StatusCode: http.StatusNotFound,
+		ErrorCode:  "ResourceNotFound",
+	}
+	if !isAzureNotFound(notFoundErr) {
+		t.Errorf("expected 404 ResourceNotFound to be classified as not found")
+	}
+
+	scopeLockedErr := &azcore.ResponseError{
+		StatusCode: http.StatusConflict,
+		ErrorCode:  "ScopeLocked",
+	}
+	if isAzureNotFound(scopeLockedErr) {
+		t.Errorf("expected 409 ScopeLocked to NOT be classified as not found")
+	}
+}
 
 func TestPhases_DryRun(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "azrbnkctl-phases-test-*")
@@ -165,6 +188,26 @@ bnk:
 		t.Fatalf("Phase37 failed: %v", err)
 	}
 
+	// Phase 38
+	if err := Phase38CWCHeal(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38 failed: %v", err)
+	}
+
+	// Phase 38b
+	if err := Phase38bDSSMInsecureOverlay(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38b failed: %v", err)
+	}
+
+	// Phase 38c
+	if err := Phase38cPodManagerHeal(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38c failed: %v", err)
+	}
+
+	// Phase 38d
+	if err := Phase38dTMMLogStream(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase38d failed: %v", err)
+	}
+
 	// Phase 40
 	if err := Phase40Activation(ctx, cl, st, clients, dryRun); err != nil {
 		t.Fatalf("Phase40 failed: %v", err)
@@ -186,6 +229,110 @@ bnk:
 		t.Fatalf("PhaseDownNetworks failed: %v", err)
 	}
 	if err := PhaseDownResourceGroup(ctx, cl, st, clients, false, dryRun); err != nil {
-		t.Fatalf("PhaseDownResourceGroup failed: %v", err)
+		t.Fatalf("PhaseDownResourceGroup (keep default) failed: %v", err)
 	}
+	if err := PhaseDownResourceGroup(ctx, cl, st, clients, true, dryRun); err != nil {
+		t.Fatalf("PhaseDownResourceGroup (deleteRG=true) failed: %v", err)
+	}
+
+	// Also verify BNK 2.4 path for Phase 37 and Phase 50
+	cl.Bnk.ManifestVersion = "2.4.0"
+	if err := Phase37VlansRoutes(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase37 (BNK 2.4) failed: %v", err)
+	}
+	if err := Phase50Egress(ctx, cl, st, clients, dryRun); err != nil {
+		t.Fatalf("Phase50 (BNK 2.4) failed: %v", err)
+	}
+}
+
+func TestRunFLOHelmInstall_InstallAndIdempotentUpgrade(t *testing.T) {
+	tmpDir := t.TempDir()
+	st, err := state.New(tmpDir)
+	if err != nil {
+		t.Fatalf("state.New: %v", err)
+	}
+
+	fake := &fakePhase32Helm{}
+	vals := map[string]interface{}{"containerPlatform": "Azure"}
+
+	// 1. Fresh install
+	if err := runFLOHelmInstall(context.Background(), fake, st, "v2.21.13-0.0.64", vals); err != nil {
+		t.Fatalf("fresh install failed: %v", err)
+	}
+	if fake.installCalls != 1 || fake.upgradeCalls != 0 {
+		t.Fatalf("expected 1 install, 0 upgrades; got %d, %d", fake.installCalls, fake.upgradeCalls)
+	}
+	if st.Get("FLO_VERSION") != "v2.21.13-0.0.64" {
+		t.Errorf("FLO_VERSION = %q, want v2.21.13-0.0.64", st.Get("FLO_VERSION"))
+	}
+
+	// 2. Idempotent re-run at same version + values -> no upgrade
+	if err := runFLOHelmInstall(context.Background(), fake, st, "v2.21.13-0.0.64", vals); err != nil {
+		t.Fatalf("idempotent re-run failed: %v", err)
+	}
+	if fake.installCalls != 1 || fake.upgradeCalls != 0 {
+		t.Fatalf("expected 1 install, 0 upgrades after idempotent run; got %d, %d", fake.installCalls, fake.upgradeCalls)
+	}
+
+	// 3. Version bump -> upgrade
+	if err := runFLOHelmInstall(context.Background(), fake, st, "v2.30.0-0.5.2", vals); err != nil {
+		t.Fatalf("upgrade run failed: %v", err)
+	}
+	if fake.upgradeCalls != 1 {
+		t.Fatalf("expected 1 upgrade; got %d", fake.upgradeCalls)
+	}
+	if st.Get("FLO_VERSION") != "v2.30.0-0.5.2" {
+		t.Errorf("FLO_VERSION = %q, want v2.30.0-0.5.2", st.Get("FLO_VERSION"))
+	}
+}
+
+type fakePhase32Helm struct {
+	installed    *release.Release
+	installCalls int
+	upgradeCalls int
+}
+
+func (f *fakePhase32Helm) List(_, _ string) ([]*release.Release, error) {
+	if f.installed == nil {
+		return nil, nil
+	}
+	return []*release.Release{f.installed}, nil
+}
+
+func (f *fakePhase32Helm) Install(name, ns string, ch *chart.Chart, vals map[string]interface{}) (*release.Release, error) {
+	f.installCalls++
+	f.installed = &release.Release{
+		Name:      name,
+		Namespace: ns,
+		Chart:     ch,
+		Config:    vals,
+		Info:      &release.Info{Status: release.StatusDeployed},
+	}
+	return f.installed, nil
+}
+
+func (f *fakePhase32Helm) Upgrade(name, ns string, ch *chart.Chart, vals map[string]interface{}) (*release.Release, error) {
+	f.upgradeCalls++
+	f.installed = &release.Release{
+		Name:      name,
+		Namespace: ns,
+		Chart:     ch,
+		Config:    vals,
+		Info:      &release.Info{Status: release.StatusDeployed},
+	}
+	return f.installed, nil
+}
+
+func (f *fakePhase32Helm) Uninstall(_, _ string) error {
+	f.installed = nil
+	return nil
+}
+
+func (f *fakePhase32Helm) PullAndLoad(_, version string) (*chart.Chart, error) {
+	return &chart.Chart{
+		Metadata: &chart.Metadata{
+			Name:    "f5-lifecycle-operator",
+			Version: version,
+		},
+	}, nil
 }

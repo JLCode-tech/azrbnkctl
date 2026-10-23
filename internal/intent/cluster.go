@@ -14,6 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/JLCode-tech/azrbnkctl/internal/manifest"
 	"github.com/JLCode-tech/azrbnkctl/internal/netcalc"
 )
 
@@ -40,8 +41,8 @@ const (
 	PatternDualInterface = "dual-interface"
 
 	DefaultLocation           = "eastus"
-	DefaultManifestVersion    = "2.3.2"
-	DefaultDeploymentSize     = "Small"
+	DefaultManifestVersion    = "2.4.0"
+	DefaultDeploymentSize     = "small"
 	DefaultTmmCpu             = "4"
 	DefaultTmmMemory          = "10Gi"
 	DefaultTmmMtu             = 1500
@@ -51,7 +52,7 @@ const (
 	DefaultNetworkPluginMode  = "Overlay"
 	DefaultVNetCIDR           = "10.0.0.0/16"
 	DefaultSystemSubnetCIDR   = "10.0.0.0/20"
-	DefaultPublicSubnetCIDR   = "10.0.16.0/28"
+	DefaultPublicSubnetCIDR   = "10.0.16.0/24"
 	DefaultExternalSubnetCIDR = "10.0.17.0/24"
 	DefaultInternalSubnetCIDR = "10.0.18.0/24"
 )
@@ -100,29 +101,116 @@ type ClusterSpec struct {
 	TMMNodePool       NodePoolSpec `yaml:"tmmNodePool,omitempty"`
 }
 
-// BnkSpec defines the supply-chain credentials and BNK 2.3.x parameters.
+// BnkAIGatewaySpec configures the BNK 2.4.1+ Multi-Cluster AI Gateway (inference.k8s.f5.com/v1alpha1).
+type BnkAIGatewaySpec struct {
+	Enabled            bool   `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	AIMetrics          bool   `yaml:"aiMetrics,omitempty" json:"aiMetrics,omitempty"`
+	ConsoleURL         string `yaml:"consoleUrl,omitempty" json:"consoleUrl,omitempty"`
+	DefaultEgressRoute bool   `yaml:"defaultEgressRoute,omitempty" json:"defaultEgressRoute,omitempty"`
+	DNSResolver        bool   `yaml:"dnsResolver,omitempty" json:"dnsResolver,omitempty"`
+	DSSMSentinel       bool   `yaml:"dssmSentinel,omitempty" json:"dssmSentinel,omitempty"`
+	MultiNUMASpanning  bool   `yaml:"multiNumaSpanning,omitempty" json:"multiNumaSpanning,omitempty"`
+}
+
+// BnkSpec defines the supply-chain credentials and BNK parameters.
 type BnkSpec struct {
-	FARArchive      string `yaml:"farArchive"`
-	JWT             string `yaml:"jwt"`
-	ManifestVersion string `yaml:"manifestVersion,omitempty"`
-	DeploymentSize  string `yaml:"deploymentSize,omitempty"`
-	TmmCpu          string `yaml:"tmmCpu,omitempty"`
-	TmmMemory       string `yaml:"tmmMemory,omitempty"`
-	TmmMtu          int    `yaml:"tmmMtu,omitempty"`
-	Telemetry       bool   `yaml:"telemetry,omitempty"`
+	FARArchive      string            `yaml:"farArchive"`
+	JWT             string            `yaml:"jwt"`
+	Version         string            `yaml:"version,omitempty"`
+	ManifestVersion string            `yaml:"manifestVersion,omitempty"`
+	FLOVersion      string            `yaml:"floVersion,omitempty"`
+	DeploymentSize  string            `yaml:"deploymentSize,omitempty"`
+	TmmCpu          string            `yaml:"tmmCpu,omitempty"`
+	TmmMemory       string            `yaml:"tmmMemory,omitempty"`
+	TmmMtu          int               `yaml:"tmmMtu,omitempty"`
+	Telemetry       bool              `yaml:"telemetry,omitempty"`
+	AIGateway       *BnkAIGatewaySpec `yaml:"aiGateway,omitempty"`
+}
+
+// UnmarshalYAML accepts both integer (e.g. 1500) and numeric string (e.g. "1500")
+// values for tmmMtu while preserving strict field validation.
+func (b *BnkSpec) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			k := value.Content[i]
+			v := value.Content[i+1]
+			if k.Value == "tmmMtu" {
+				if v.Kind != yaml.ScalarNode {
+					return fmt.Errorf("tmmMtu must be an integer or string scalar, got kind %v", v.Kind)
+				}
+				s := strings.TrimSpace(v.Value)
+				if s != "" {
+					if _, err := strconv.Atoi(s); err != nil {
+						return fmt.Errorf("invalid tmmMtu %q: %w", v.Value, err)
+					}
+					v.Tag = "!!int"
+					v.Style = 0
+					v.Value = s
+				}
+			}
+		}
+	}
+	out, err := yaml.Marshal(value)
+	if err != nil {
+		return err
+	}
+	type rawBnkSpec BnkSpec
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	dec.KnownFields(true)
+	var raw rawBnkSpec
+	if err := dec.Decode(&raw); err != nil {
+		if errors.Is(err, io.EOF) {
+			*b = BnkSpec{}
+			return nil
+		}
+		return err
+	}
+	if raw.ManifestVersion == "" && raw.Version != "" {
+		raw.ManifestVersion = raw.Version
+	}
+	*b = BnkSpec(raw)
+	return nil
+}
+
+// Is24 reports whether the configured BNK manifest version uses the 2.4+ Gateway API / Infra CR model.
+func (b BnkSpec) Is24() bool {
+	v := strings.TrimPrefix(strings.TrimSpace(b.ManifestVersion), "v")
+	return !strings.HasPrefix(v, "2.3")
+}
+
+// FLOVersion resolves the FLO chart version paired with bnk.manifestVersion.
+func (c *Cluster) FLOVersion() string {
+	if c != nil {
+		if c.Bnk.FLOVersion != "" {
+			return c.Bnk.FLOVersion
+		}
+		if c.Bnk.ManifestVersion != "" {
+			if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
+				return chart
+			}
+		}
+	}
+	return manifest.DefaultFLOChart()
 }
 
 // EgressSpec defines egress/NAT settings.
 type EgressSpec struct {
-	Enabled   bool   `yaml:"enabled"`
-	Namespace string `yaml:"namespace,omitempty"`
-	Port      int    `yaml:"port,omitempty"`
+	Enabled          bool   `yaml:"enabled"`
+	Namespace        string `yaml:"namespace,omitempty"`
+	Port             int    `yaml:"port,omitempty"`
+	GatewayClassName string `yaml:"gatewayClassName,omitempty"`
+}
+
+// JumphostSpec defines optional jumphost testing settings.
+type JumphostSpec struct {
+	Enabled bool `yaml:"enabled,omitempty"`
 }
 
 // TestingSpec defines automated testing parameters.
 type TestingSpec struct {
-	Enabled    bool   `yaml:"enabled"`
-	TargetHost string `yaml:"targetHost,omitempty"`
+	Enabled    bool         `yaml:"enabled"`
+	TargetHost string       `yaml:"targetHost,omitempty"`
+	Jumphost   JumphostSpec `yaml:"jumphost,omitempty"`
 }
 
 // ForgeSpec captures the operator-declared forge integration.
@@ -147,6 +235,9 @@ type ForgeSpec struct {
 	// ProjectType is the forge project type (e.g. "cloud-azure").
 	// Default "cloud-azure".
 	ProjectType string `yaml:"projectType,omitempty"`
+	// CloudProvider is the forge project cloud provider (e.g. "azure").
+	// Default "azure".
+	CloudProvider string `yaml:"cloudProvider,omitempty"`
 	// ProjectName is the name of the forge project to register the cluster into.
 	// Defaults to "azrbnkctl-" + workspace.
 	ProjectName string `yaml:"projectName,omitempty"`
@@ -155,6 +246,14 @@ type ForgeSpec struct {
 	AgentToken string `yaml:"agent_token,omitempty"`
 	// AgentTokenCamel is a fallback alias for camelCase YAML configs (agentToken).
 	AgentTokenCamel string `yaml:"agentToken,omitempty"`
+}
+
+// ResolveProjectName returns the Forge project name, falling back to "azrbnkctl-" + clusterName.
+func (f *ForgeSpec) ResolveProjectName(clusterName string) string {
+	if f != nil && f.ProjectName != "" {
+		return f.ProjectName
+	}
+	return "azrbnkctl-" + clusterName
 }
 
 // ResolveAgentToken returns the agent token to use, in priority order:
@@ -388,7 +487,7 @@ func (c *Cluster) setDefaults() {
 	}
 
 	if c.Egress.Enabled && c.Egress.Namespace == "" {
-		c.Egress.Namespace = "egress-demo"
+		c.Egress.Namespace = "bnk-demo"
 	}
 	if c.Egress.Enabled && c.Egress.Port == 0 {
 		c.Egress.Port = 4789

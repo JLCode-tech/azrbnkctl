@@ -30,10 +30,20 @@ type Client struct {
 }
 
 // NewClient constructs a Client targeting the given MCP endpoint.
-// Pass "" to use [DefaultMCPURL], or the AZRBNKCTL_FORGE_MCP_URL env var when set.
+// Pass "" to use [DefaultMCPURL], or BNKCTL_FORGE_MCP_URL / cloud-specific env vars when set.
 func NewClient(endpoint string) *Client {
 	if endpoint == "" {
-		endpoint = os.Getenv("AZRBNKCTL_FORGE_MCP_URL")
+		for _, k := range []string{
+			"BNKCTL_FORGE_MCP_URL",
+			"AWSBNKCTL_FORGE_MCP_URL",
+			"AZRBNKCTL_FORGE_MCP_URL",
+			"GKEBNKCTL_FORGE_MCP_URL",
+		} {
+			if v := os.Getenv(k); v != "" {
+				endpoint = v
+				break
+			}
+		}
 	}
 	if endpoint == "" {
 		endpoint = DefaultMCPURL
@@ -69,8 +79,8 @@ func (c *Client) SystemVersion(ctx context.Context) (string, error) {
 type CreateProjectRequest struct {
 	Name                  string `json:"name"`
 	Description           string `json:"description,omitempty"`
-	ProjectType           string `json:"project_type,omitempty"`   // e.g. "cloud-azure"
-	CloudProvider         string `json:"cloud_provider,omitempty"` // e.g. "azure"
+	ProjectType           string `json:"project_type,omitempty"`   // e.g. "cloud-aws", "cloud-azure", "cloud-gcp"
+	CloudProvider         string `json:"cloud_provider,omitempty"` // e.g. "aws", "azure", "gcp"
 	Environment           string `json:"environment,omitempty"`    // default "dev"
 	Region                string `json:"region,omitempty"`
 	AWSProfile            string `json:"aws_profile,omitempty"`
@@ -82,7 +92,7 @@ type CreateProjectRequest struct {
 	TargetPlatformProfile string `json:"target_platform_profile,omitempty"`
 }
 
-// CreateProjectResponse captures the fields azrbnkctl actually reads.
+// CreateProjectResponse captures the fields bnkctl reads.
 type CreateProjectResponse struct {
 	Project struct {
 		ID   int    `json:"id"`
@@ -112,7 +122,7 @@ func (r *CreateProjectResponse) UnmarshalJSON(b []byte) error {
 		} else if flat.ID > 0 {
 			r.Project.ID = flat.ID
 		}
-		if flat.Name != "" {
+		if r.Project.Name == "" && flat.Name != "" {
 			r.Project.Name = flat.Name
 		}
 	}
@@ -124,9 +134,12 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	args := map[string]any{
 		"name": req.Name,
 	}
-	if req.Description != "" {
-		args["description"] = req.Description
+	addStr := func(k, v string) {
+		if v != "" {
+			args[k] = v
+		}
 	}
+	addStr("description", req.Description)
 	if req.ProjectType != "" {
 		args["project_type"] = req.ProjectType
 	} else {
@@ -142,23 +155,15 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	} else {
 		args["environment"] = "dev"
 	}
-	if req.Region != "" {
-		args["region"] = req.Region
-	}
-	if req.BackendType != "" {
-		args["backend_type"] = req.BackendType
-	}
-	if req.Color != "" {
-		args["color"] = req.Color
-	}
-	if req.Icon != "" {
-		args["icon"] = req.Icon
-	}
+	addStr("region", req.Region)
+	addStr("aws_profile", req.AWSProfile)
+	addStr("azure_subscription_id", req.AzureSubscriptionID)
+	addStr("backend_type", req.BackendType)
+	addStr("color", req.Color)
+	addStr("icon", req.Icon)
+	addStr("target_platform_profile", req.TargetPlatformProfile)
 	if req.CredentialTemplateID > 0 {
 		args["credential_template_id"] = req.CredentialTemplateID
-	}
-	if req.TargetPlatformProfile != "" {
-		args["target_platform_profile"] = req.TargetPlatformProfile
 	}
 
 	res, err := c.mcp.CallTool(ctx, "create_project", args)
@@ -167,7 +172,7 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	}
 
 	var out CreateProjectResponse
-	if err := json.Unmarshal([]byte(res.Text()), &out); err != nil {
+	if err := res.UnmarshalToolJSON(&out); err != nil {
 		return CreateProjectResponse{}, fmt.Errorf("decode create_project: %w (raw: %s)", err, res.Text())
 	}
 	var errCheck struct {
@@ -177,33 +182,75 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	}
 	_ = json.Unmarshal([]byte(res.Text()), &errCheck)
 	if (errCheck.Ok != nil && !*errCheck.Ok) || (errCheck.Error != nil && out.Project.ID == 0) || out.Project.ID == 0 {
-		if strings.Contains(res.Text(), "already exists") || strings.Contains(res.Text(), "PROJECT_CONFLICT") {
-			if existing, findErr := c.FindProjectByName(ctx, req.Name); findErr == nil {
-				return existing, nil
-			}
-		}
 		return CreateProjectResponse{}, fmt.Errorf("create_project failed: %s", res.Text())
 	}
 	return out, nil
 }
 
-// FindProjectByName queries list_projects MCP tool and matches by name.
+// ListProjectsResponse captures projects returned by the list_projects MCP tool.
+type ListProjectsResponse struct {
+	Projects []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"projects"`
+}
+
+// UnmarshalJSON handles both {"projects": [...]} envelopes and bare [...] arrays.
+func (r *ListProjectsResponse) UnmarshalJSON(b []byte) error {
+	type projectItem struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+	var env struct {
+		Projects []projectItem `json:"projects"`
+	}
+	if err := json.Unmarshal(b, &env); err == nil && env.Projects != nil {
+		r.Projects = make([]struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		}, len(env.Projects))
+		for i, p := range env.Projects {
+			r.Projects[i].ID = p.ID
+			r.Projects[i].Name = p.Name
+		}
+		return nil
+	}
+	var arr []projectItem
+	if err := json.Unmarshal(b, &arr); err == nil {
+		r.Projects = make([]struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		}, len(arr))
+		for i, p := range arr {
+			r.Projects[i].ID = p.ID
+			r.Projects[i].Name = p.Name
+		}
+		return nil
+	}
+	return fmt.Errorf("decode list_projects: %s", string(b))
+}
+
+// ListProjects queries forge's list_projects MCP tool.
+func (c *Client) ListProjects(ctx context.Context) (ListProjectsResponse, error) {
+	r, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	if err != nil {
+		return ListProjectsResponse{}, err
+	}
+	var out ListProjectsResponse
+	if err := r.UnmarshalToolJSON(&out); err != nil {
+		return ListProjectsResponse{}, err
+	}
+	return out, nil
+}
+
+// FindProjectByName queries list_projects MCP tool and matches by name (case-insensitive fallback).
 func (c *Client) FindProjectByName(ctx context.Context, name string) (CreateProjectResponse, error) {
-	res, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	data, err := c.ListProjects(ctx)
 	if err != nil {
 		return CreateProjectResponse{}, err
 	}
-	var data struct {
-		Projects []struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
-		} `json:"projects"`
-	}
-	if err := json.Unmarshal([]byte(res.Text()), &data); err != nil {
-		return CreateProjectResponse{}, err
-	}
 	for _, p := range data.Projects {
-		if p.Name == name {
+		if p.Name == name || strings.EqualFold(p.Name, name) {
 			var resp CreateProjectResponse
 			resp.Success = true
 			resp.Project.ID = p.ID
@@ -219,16 +266,20 @@ func (c *Client) DeleteProject(ctx context.Context, projectID int, force bool) e
 	_, err := c.mcp.CallTool(ctx, "delete_project", map[string]any{
 		"project_id": projectID,
 		"force":      force,
+		"confirm":    true,
 	})
 	return err
 }
 
 // CreateClusterRequest mirrors the create_cluster tool arguments.
 type CreateClusterRequest struct {
-	ProjectID     int    `json:"project_id"`
-	Name          string `json:"name"`
-	CloudProvider string `json:"cloud_provider"`
-	Region        string `json:"region"`
+	ProjectID        int    `json:"project_id"`
+	Name             string `json:"name"`
+	Kubeconfig       string `json:"kubeconfig,omitempty"`
+	CloudProvider    string `json:"cloud_provider"`
+	Region           string `json:"region"`
+	Context          string `json:"context,omitempty"`
+	DefaultNamespace string `json:"default_namespace,omitempty"`
 }
 
 // CreateClusterResponse is what create_cluster returns.
@@ -263,7 +314,7 @@ func (r *CreateClusterResponse) UnmarshalJSON(b []byte) error {
 		} else if flat.ID > 0 {
 			r.Cluster.ID = flat.ID
 		}
-		if flat.Name != "" {
+		if r.Cluster.Name == "" && flat.Name != "" {
 			r.Cluster.Name = flat.Name
 		}
 		if flat.ProjectID > 0 {
@@ -273,18 +324,33 @@ func (r *CreateClusterResponse) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// CreateCluster registers an AKS cluster with forge.
+// CreateCluster registers a Kubernetes cluster with forge.
 func (c *Client) CreateCluster(ctx context.Context, req CreateClusterRequest, kubeconfig []byte) (CreateClusterResponse, error) {
-	provider := req.CloudProvider
-	if provider == "" {
-		provider = "azure"
+	if req.ProjectID == 0 {
+		return CreateClusterResponse{}, fmt.Errorf("CreateCluster: project_id is required")
+	}
+	if req.Name == "" {
+		return CreateClusterResponse{}, fmt.Errorf("CreateCluster: cluster name is required")
+	}
+	if len(kubeconfig) == 0 {
+		return CreateClusterResponse{}, fmt.Errorf("CreateCluster: kubeconfig is empty")
 	}
 	args := map[string]any{
-		"project_id":     req.ProjectID,
-		"name":           req.Name,
-		"cloud_provider": provider,
-		"region":         req.Region,
-		"kubeconfig":     base64.StdEncoding.EncodeToString(kubeconfig),
+		"project_id": req.ProjectID,
+		"name":       req.Name,
+		"kubeconfig": base64.StdEncoding.EncodeToString(kubeconfig),
+	}
+	if req.CloudProvider != "" {
+		args["cloud_provider"] = req.CloudProvider
+	}
+	if req.Region != "" {
+		args["region"] = req.Region
+	}
+	if req.Context != "" {
+		args["context"] = req.Context
+	}
+	if req.DefaultNamespace != "" {
+		args["default_namespace"] = req.DefaultNamespace
 	}
 
 	res, err := c.mcp.CallTool(ctx, "create_cluster", args)
@@ -293,7 +359,7 @@ func (c *Client) CreateCluster(ctx context.Context, req CreateClusterRequest, ku
 	}
 
 	var out CreateClusterResponse
-	if err := json.Unmarshal([]byte(res.Text()), &out); err != nil {
+	if err := res.UnmarshalToolJSON(&out); err != nil {
 		return CreateClusterResponse{}, fmt.Errorf("decode create_cluster: %w (raw: %s)", err, res.Text())
 	}
 	var errCheck struct {
@@ -341,10 +407,77 @@ func (c *Client) BNKHealth(ctx context.Context, clusterID int) (string, error) {
 	return res.Text(), nil
 }
 
+// ListClustersResponse captures clusters returned by the list_clusters MCP tool.
+type ListClustersResponse struct {
+	Clusters []struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		ProjectID int    `json:"project_id"`
+	} `json:"clusters"`
+}
+
+// UnmarshalJSON handles both {"clusters": [...]} envelopes and bare [...] arrays.
+func (r *ListClustersResponse) UnmarshalJSON(b []byte) error {
+	type clusterItem struct {
+		ID        int    `json:"id"`
+		Name      string `json:"name"`
+		ProjectID int    `json:"project_id"`
+	}
+	var env struct {
+		Clusters []clusterItem `json:"clusters"`
+	}
+	if err := json.Unmarshal(b, &env); err == nil && env.Clusters != nil {
+		r.Clusters = make([]struct {
+			ID        int    `json:"id"`
+			Name      string `json:"name"`
+			ProjectID int    `json:"project_id"`
+		}, len(env.Clusters))
+		for i, cl := range env.Clusters {
+			r.Clusters[i].ID = cl.ID
+			r.Clusters[i].Name = cl.Name
+			r.Clusters[i].ProjectID = cl.ProjectID
+		}
+		return nil
+	}
+	var arr []clusterItem
+	if err := json.Unmarshal(b, &arr); err == nil {
+		r.Clusters = make([]struct {
+			ID        int    `json:"id"`
+			Name      string `json:"name"`
+			ProjectID int    `json:"project_id"`
+		}, len(arr))
+		for i, cl := range arr {
+			r.Clusters[i].ID = cl.ID
+			r.Clusters[i].Name = cl.Name
+			r.Clusters[i].ProjectID = cl.ProjectID
+		}
+		return nil
+	}
+	return fmt.Errorf("decode list_clusters: %s", string(b))
+}
+
+// ListClusters queries forge's list_clusters MCP tool for a project.
+func (c *Client) ListClusters(ctx context.Context, projectID int) (ListClustersResponse, error) {
+	args := map[string]any{}
+	if projectID > 0 {
+		args["project_id"] = projectID
+	}
+	r, err := c.mcp.CallTool(ctx, "list_clusters", args)
+	if err != nil {
+		return ListClustersResponse{}, err
+	}
+	var out ListClustersResponse
+	if err := r.UnmarshalToolJSON(&out); err != nil {
+		return ListClustersResponse{}, err
+	}
+	return out, nil
+}
+
 // DeleteCluster unregisters a cluster from forge.
 func (c *Client) DeleteCluster(ctx context.Context, clusterID int) error {
 	_, err := c.mcp.CallTool(ctx, "delete_cluster", map[string]any{
 		"cluster_id": clusterID,
+		"confirm":    true,
 	})
 	return err
 }

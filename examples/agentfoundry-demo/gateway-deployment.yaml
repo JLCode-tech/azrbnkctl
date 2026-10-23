@@ -3,7 +3,7 @@ kind: GatewayClass
 metadata:
   name: bnk-agentfoundry-demo-gatewayclass
 spec:
-  controllerName: f5.com/f5-bnk-f5-cne-controller
+  controllerName: f5.com/f5-cne-system-f5-cne-controller
   description: F5 BIG-IP Kubernetes Gateway
 ---
 apiVersion: cert-manager.io/v1
@@ -23,6 +23,55 @@ spec:
     kind: ClusterIssuer
     group: cert-manager.io
 ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentfoundry
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: azrbnkctl-default
+  namespace: agentfoundry
+spec:
+  egressConfigs:
+  - hardwareAcceleration: none
+    name: default-egress
+    networkRef:
+      name: internal
+    sourceNATConfig:
+      type: Automap
+  ingressConfig:
+    defaultListenerNetwork:
+      ipamRefs:
+      - name: listener-pool
+      networkRefs:
+      - name: external
+      sourceNATConfig:
+        type: Automap
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
+metadata:
+  name: azrbnkctl-default
+  namespace: default
+spec:
+  egressConfigs:
+  - hardwareAcceleration: none
+    name: default-egress
+    networkRef:
+      name: internal
+    sourceNATConfig:
+      type: Automap
+  ingressConfig:
+    defaultListenerNetwork:
+      ipamRefs:
+      - name: listener-pool
+      networkRefs:
+      - name: external
+      sourceNATConfig:
+        type: Automap
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -30,6 +79,11 @@ metadata:
   namespace: default
 spec:
   gatewayClassName: bnk-agentfoundry-demo-gatewayclass
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: azrbnkctl-default
   listeners:
   - name: http
     protocol: HTTP

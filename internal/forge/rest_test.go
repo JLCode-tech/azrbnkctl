@@ -112,6 +112,66 @@ func TestForgeREST_FullLifecycle(t *testing.T) {
 	_ = clusterList
 }
 
+func TestForgeREST_UnregisterRESTByName_WrappedResponse(t *testing.T) {
+	deletedAgents := 0
+	deletedTargets := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case path == "/api/auth/login" && r.Method == http.MethodPost:
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "mock-jwt-token"})
+		case path == "/api/projects" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{
+					{"id": 42, "name": "azrbnkctl-poc-dual-interface"},
+				},
+			})
+		case path == "/api/projects/42/k8s/clusters" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"clusters": []map[string]any{
+					{"id": 99, "name": "poc-dual-interface", "project_id": 42},
+				},
+			})
+		case path == "/api/benchmarks/targets" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 7, "cluster_id": 99},
+			})
+		case path == "/api/benchmarks/targets/7/proxies" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case path == "/api/benchmarks/targets/7" && r.Method == http.MethodDelete:
+			deletedTargets++
+			w.WriteHeader(http.StatusOK)
+		case path == "/api/benchmarks/agents" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 11, "name": "awsbnkctl-jumphost-i-0d54ca729219a0c7f"},
+			})
+		case path == "/api/benchmarks/agents/11" && r.Method == http.MethodDelete:
+			deletedAgents++
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	creds := forge.RestCreds{Username: "admin", Password: "changeme"}
+	if err := forge.UnregisterRESTByName(context.Background(), srv.URL, "poc-dual-interface", creds); err != nil {
+		t.Fatalf("UnregisterRESTByName with wrapped JSON response failed: %v", err)
+	}
+	if deletedTargets != 1 || deletedAgents != 1 {
+		t.Fatalf("expected benchmark target and agent to be deleted before cluster purge, got deletedTargets=%d deletedAgents=%d", deletedTargets, deletedAgents)
+	}
+}
+
+func TestUnregisterMCPByName_ReturnsErrNotExistWhenNotPurged(t *testing.T) {
+	err := forge.UnregisterMCPByName(context.Background(), forge.NewClient("http://127.0.0.1:1"), "agent-core-singapore", false)
+	if err == nil {
+		t.Fatal("expected error when purge=false, got nil")
+	}
+}
+
 func stringsHasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }

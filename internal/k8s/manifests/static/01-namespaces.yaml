@@ -1,7 +1,22 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: f5-bnk
+  name: cert-manager
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: f5-cne-core
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: f5-cne-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: f5-bnk-instance
 ---
 apiVersion: v1
 kind: Namespace
@@ -11,4 +26,10 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: bnk-demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: egress-demo
+

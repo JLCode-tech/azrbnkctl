@@ -196,7 +196,7 @@ var gvrByKind = map[string]schema.GroupVersionResource{
 	"BNKNetPolicy":             BNKNetPolGVR,
 	"Gateway":                  GatewayGVR,
 	"GatewayClass":             GatewayClassGVR,
-	"CustomResourceDefinition": schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"},
+	"CustomResourceDefinition": {Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"},
 	"Infra":                    InfraGVR,
 	"GatewaySettings":          GatewaySettingsGVR,
 	"EgressGateway":            EgressGatewayGVR,

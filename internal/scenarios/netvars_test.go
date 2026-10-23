@@ -28,7 +28,8 @@ func TestNetVarsFor(t *testing.T) {
 
 	v := NetVarsFor(dualCluster(), st)
 	want := NetVars{NodeIfname: "eth0", VpcNet: "10.50.0.0", VpcPrefixLen: 16,
-		ExtGateway: "10.50.10.1", IntGateway: "10.50.20.1", TMMExtSelfIP: "10.50.10.241", TMMIntSelfIP: "10.50.20.240"}
+		ExtGateway: "10.50.10.1", IntGateway: "10.50.20.1", TMMExtSelfIP: "10.50.10.241", TMMIntSelfIP: "10.50.20.240",
+		VIP: "10.50.10.100", AgentCoreVIP: "10.50.10.107"}
 	if v != want {
 		t.Errorf("NetVarsFor = %+v, want %+v", v, want)
 	}
@@ -50,13 +51,13 @@ func TestTemplateVars(t *testing.T) {
 	st.Set("NODE_PRIMARY_IFNAME", "ens5")
 	st.Set("VPC_ID", "vpc-123")
 	m := TemplateVars(dualCluster(), st)
-	for k, want := range map[string]any{"VPC_ID": "vpc-123", "NodeIfname": "ens5", "ExtGateway": "10.50.10.1", "VpcPrefixLen": 16} {
+	for k, want := range map[string]any{"VPC_ID": "vpc-123", "NodeIfname": "ens5", "ExtGateway": "10.50.10.1", "VpcPrefixLen": 16, "VIP": "10.50.10.100", "AgentCoreVIP": "10.50.10.107"} {
 		if m[k] != want {
 			t.Errorf("TemplateVars[%s] = %v, want %v", k, m[k], want)
 		}
 	}
-	out, err := RenderTemplate("gw={{.ExtGateway}} nic={{.NodeIfname}} vpc={{.VPC_ID}}", m)
-	if err != nil || out != "gw=10.50.10.1 nic=ens5 vpc=vpc-123" {
+	out, err := RenderTemplate("gw={{.ExtGateway}} nic={{.NodeIfname}} vpc={{.VPC_ID}} vip={{.VIP}}", m)
+	if err != nil || out != "gw=10.50.10.1 nic=ens5 vpc=vpc-123 vip=10.50.10.100" {
 		t.Errorf("render = %q, %v", out, err)
 	}
 }

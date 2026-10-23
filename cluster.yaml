@@ -5,7 +5,7 @@ metadata:
   name: poc-dual-interface
   subscriptionId: 00000000-0000-0000-0000-000000000000
   location: eastus2
-  resourceGroup: f5-bigip-ve-demo-rg
+  resourceGroup: azrbnkctl-poc-dual-interface-rg
 
 pattern: dual-interface
 
@@ -40,7 +40,7 @@ bnk:
 
 egress:
   enabled: true
-  namespace: "egress-demo"
+  namespace: "bnk-demo"
   port: 4789
 
 forge:

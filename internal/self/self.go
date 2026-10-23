@@ -1,19 +1,29 @@
 package self
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 )
 
 // GitHubRepo is the default repository for release updates.
-const GitHubRepo = "JLCode-tech/azrbnkctl"
+const (
+	GitHubRepo     = "JLCode-tech/azrbnkctl"
+	binaryBaseName = "azrbnkctl"
+	maxBinaryBytes = 200 << 20 // 200 MiB cap for decompression safety
+)
 
 // Release represents a GitHub release descriptor.
 type Release struct {
@@ -28,8 +38,16 @@ type Release struct {
 // Asset represents a release asset download item.
 type Asset struct {
 	Name               string `json:"name"`
+	URL                string `json:"url"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Size               int64  `json:"size"`
+}
+
+func getGitHubToken() string {
+	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+		return t
+	}
+	return os.Getenv("GH_TOKEN")
 }
 
 // CheckUpdate queries GitHub for the latest release tag.
@@ -44,6 +62,10 @@ func CheckUpdate(ctx context.Context, repo string, currentVersion string) (*Rele
 		return nil, false, err
 	}
 	req.Header.Set("User-Agent", "azrbnkctl-updater")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if token := getGitHubToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -72,48 +94,213 @@ func CheckUpdate(ctx context.Context, repo string, currentVersion string) (*Rele
 	return &rel, hasUpdate, nil
 }
 
-// DownloadAsset downloads the binary asset matching current OS/Arch.
+// ExpectedChecksum parses a GoReleaser checksums.txt body and returns the hex
+// SHA-256 digest for assetName.
+func ExpectedChecksum(checksumsTxt, assetName string) (string, error) {
+	for _, line := range strings.Split(checksumsTxt, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == assetName {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	return "", fmt.Errorf("asset %q not found in checksums.txt", assetName)
+}
+
+// VerifyChecksum verifies that data matches the SHA-256 digest in checksumsTxt for assetName.
+func VerifyChecksum(data []byte, checksumsTxt, assetName string) error {
+	want, err := ExpectedChecksum(checksumsTxt, assetName)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	got := fmt.Sprintf("%x", sum[:])
+	if !strings.EqualFold(got, want) {
+		return fmt.Errorf("sha256 mismatch for %s: got %s, want %s", assetName, got, want)
+	}
+	return nil
+}
+
+func downloadAssetBytes(ctx context.Context, asset Asset) ([]byte, error) {
+	token := getGitHubToken()
+	downloadURL := asset.BrowserDownloadURL
+	if token != "" && asset.URL != "" {
+		downloadURL = asset.URL
+	}
+	if downloadURL == "" {
+		return nil, fmt.Errorf("asset %q has no download URL", asset.Name)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "azrbnkctl-updater")
+	req.Header.Set("Accept", "application/octet-stream")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download asset from %s: %w", downloadURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("download error (HTTP %d)", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBinaryBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read %s body: %w", asset.Name, err)
+	}
+	return data, nil
+}
+
+// DownloadAsset downloads the binary asset matching current OS/Arch, verifies
+// its SHA-256 digest against checksums.txt (when present in the release), and
+// extracts the azrbnkctl binary from .tar.gz/.tgz or .zip archives.
 func DownloadAsset(ctx context.Context, rel *Release, destPath string) error {
-	expectedSuffix := fmt.Sprintf("%s_%s", runtime.GOOS, runtime.GOARCH)
+	return DownloadAssetForPlatform(ctx, rel, runtime.GOOS, runtime.GOARCH, destPath)
+}
+
+// DownloadAssetForPlatform is the platform-parameterized implementation of DownloadAsset.
+func DownloadAssetForPlatform(ctx context.Context, rel *Release, goos, goarch, destPath string) error {
+	expectedSuffix := fmt.Sprintf("%s_%s", goos, goarch)
 	var targetAsset *Asset
-	for _, a := range rel.Assets {
-		if strings.Contains(a.Name, expectedSuffix) {
-			targetAsset = &a
-			break
+	var checksumAsset *Asset
+
+	for i := range rel.Assets {
+		a := &rel.Assets[i]
+		if strings.EqualFold(a.Name, "checksums.txt") {
+			checksumAsset = a
+			continue
+		}
+		if strings.Contains(strings.ToLower(a.Name), strings.ToLower(expectedSuffix)) {
+			targetAsset = a
 		}
 	}
 
 	if targetAsset == nil {
 		return fmt.Errorf("no matching release binary for platform %s/%s in release %s",
-			runtime.GOOS, runtime.GOARCH, rel.TagName)
+			goos, goarch, rel.TagName)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetAsset.BrowserDownloadURL, nil)
+	archiveBytes, err := downloadAssetBytes(ctx, *targetAsset)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "azrbnkctl-updater")
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	if checksumAsset != nil {
+		sumBytes, err := downloadAssetBytes(ctx, *checksumAsset)
+		if err != nil {
+			return fmt.Errorf("download checksums.txt: %w", err)
+		}
+		if err := VerifyChecksum(archiveBytes, string(sumBytes), targetAsset.Name); err != nil {
+			return err
+		}
+	}
+
+	targetBin := binaryBaseName
+	if goos == "windows" {
+		targetBin = binaryBaseName + ".exe"
+	}
+
+	lowerName := strings.ToLower(targetAsset.Name)
+	switch {
+	case strings.HasSuffix(lowerName, ".tar.gz") || strings.HasSuffix(lowerName, ".tgz"):
+		return extractTarGz(archiveBytes, targetBin, destPath)
+	case strings.HasSuffix(lowerName, ".zip"):
+		return extractZip(archiveBytes, targetBin, destPath)
+	default:
+		return writeExecutable(destPath, archiveBytes)
+	}
+}
+
+func extractTarGz(archiveBytes []byte, targetBin, destPath string) error {
+	gzr, err := gzip.NewReader(bytes.NewReader(archiveBytes))
 	if err != nil {
-		return fmt.Errorf("download asset from %s: %w", targetAsset.BrowserDownloadURL, err)
+		return fmt.Errorf("open gzip archive: %w", err)
 	}
-	defer resp.Body.Close()
+	defer gzr.Close()
 
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("download error (HTTP %d)", resp.StatusCode)
+	tr := tar.NewReader(gzr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar entry: %w", err)
+		}
+		if hdr.Typeflag == tar.TypeReg && filepath.Base(hdr.Name) == targetBin {
+			binBytes, err := io.ReadAll(io.LimitReader(tr, maxBinaryBytes))
+			if err != nil {
+				return fmt.Errorf("extract %s from tar.gz: %w", targetBin, err)
+			}
+			return writeExecutable(destPath, binBytes)
+		}
 	}
+	return fmt.Errorf("binary %q not found inside tar.gz archive", targetBin)
+}
 
+func extractZip(archiveBytes []byte, targetBin, destPath string) error {
+	zr, err := zip.NewReader(bytes.NewReader(archiveBytes), int64(len(archiveBytes)))
+	if err != nil {
+		return fmt.Errorf("open zip archive: %w", err)
+	}
+	for _, f := range zr.File {
+		if filepath.Base(f.Name) == targetBin {
+			rc, err := f.Open()
+			if err != nil {
+				return fmt.Errorf("open %s in zip: %w", targetBin, err)
+			}
+			binBytes, readErr := io.ReadAll(io.LimitReader(rc, maxBinaryBytes))
+			_ = rc.Close()
+			if readErr != nil {
+				return fmt.Errorf("extract %s from zip: %w", targetBin, readErr)
+			}
+			return writeExecutable(destPath, binBytes)
+		}
+	}
+	return fmt.Errorf("binary %q not found inside zip archive", targetBin)
+}
+
+func writeExecutable(destPath string, data []byte) error {
 	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755) // #nosec G304 G302 -- self-update destination binary requires executable bit
 	if err != nil {
 		return fmt.Errorf("create dest %s: %w", destPath, err)
 	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	if _, err := out.Write(data); err != nil {
+		_ = out.Close()
 		return fmt.Errorf("write binary: %w", err)
 	}
+	return out.Close()
+}
 
+// ReplaceExecutable atomically swaps tmpPath into execPath, handling Windows
+// where an active executable must be renamed aside before replacement.
+func ReplaceExecutable(tmpPath, execPath string) error {
+	return replaceExecutableForOS(runtime.GOOS, tmpPath, execPath)
+}
+
+func replaceExecutableForOS(goos, tmpPath, execPath string) error {
+	if goos == "windows" {
+		oldPath := execPath + ".old"
+		_ = os.Remove(oldPath)
+		if err := os.Rename(execPath, oldPath); err != nil {
+			return fmt.Errorf("move active windows binary aside (%s -> %s): %w", execPath, oldPath, err)
+		}
+		if err := os.Rename(tmpPath, execPath); err != nil {
+			_ = os.Rename(oldPath, execPath)
+			return fmt.Errorf("replace binary %s: %w", execPath, err)
+		}
+		_ = os.Remove(oldPath)
+		return nil
+	}
+	if err := os.Rename(tmpPath, execPath); err != nil {
+		return fmt.Errorf("replace binary %s: %w", execPath, err)
+	}
 	return nil
 }

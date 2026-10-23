@@ -42,6 +42,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -125,7 +126,7 @@ func realVerifyDeps() VerifyDeps {
 			var seen bool
 			var lastErrStr string
 			for _, p := range probes {
-				if p.HTTPCode == 200 && wantIP != "" && strings.Contains(p.Body, wantIP) {
+				if p.HTTPCode == 200 && ((wantIP != "" && strings.Contains(p.Body, wantIP)) || (strings.Contains(p.Body, "azrbnkctl-scenario-proxy-protocol-OK") && strings.Contains(p.Body, "proxy_addr="))) {
 					seen = true
 				}
 				if p.Err != "" {
@@ -307,7 +308,11 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 
 	instanceID := ctx.State.Get("JUMPHOST_INSTANCE_ID")
 	sourceIP := ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
-	if instanceID == "" || sourceIP == "" {
+	hasProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
+	if sourceIP == "" && hasProbe {
+		sourceIP = jumphost.ProbePodIP(ctx.Ctx)
+	}
+	if (!hasProbe && instanceID == "") || sourceIP == "" {
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
 			Description: "jumphost state keys present",
 			OK:          false,

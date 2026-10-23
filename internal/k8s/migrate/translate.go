@@ -22,7 +22,7 @@ type Options struct {
 	// whose controllerName starts with "f5.com/".
 	GatewayClassName string
 	// ZoneByNetwork maps a VLAN name to the availability zone of its subnet.
-	// On AWS the 2.4 controller groups TMMs per zone and only counts pools
+	// On Azure the 2.4 controller groups TMMs per zone and only counts pools
 	// that carry one, so azrbnkctl fills this from cluster.yaml when it can.
 	ZoneByNetwork map[string]string
 	// SingleSelfIP keeps each self-IP pool at exactly the 2.3 address. The
@@ -111,14 +111,26 @@ func (t *translator) loadNADs() {
 	t.nads = list
 }
 
-// nadForInterface maps a 2.3 trunk interface ("1.1") to the NAD name.
+// nadForInterface maps a 2.3 trunk interface ("1.1" or Azure Socket Mode "0.2"/"0.3") to the NAD name.
 func (t *translator) nadForInterface(iface string) (string, bool) {
 	parts := strings.Split(iface, ".")
 	if len(parts) != 2 {
 		return "", false
 	}
 	n, err := strconv.Atoi(parts[1])
-	if err != nil || n < 1 || n > len(t.nads) {
+	if err != nil {
+		return "", false
+	}
+	// On Azure Socket Mode (net1=0.2, net2=0.3), interface 0.2 maps to the 1st NAD (index 0)
+	// and interface 0.3 maps to the 2nd NAD (index 1).
+	if parts[0] == "0" {
+		idx := n - 2
+		if idx < 0 || idx >= len(t.nads) {
+			return "", false
+		}
+		return t.nads[idx], true
+	}
+	if parts[0] != "1" || n < 1 || n > len(t.nads) {
 		return "", false
 	}
 	return t.nads[n-1], true
@@ -179,7 +191,7 @@ func (t *translator) vlans() {
 			t.warn("F5SPKVlan %s has no selfip_v4s: network %s gets no ipamRefs", name, name)
 		}
 		if zone == "" {
-			t.warn("F5SPKVlan %s: no availability zone known for its pool; on AWS the 2.4 controller only counts zoned pools (pass --config so azrbnkctl reads network.dataPath)", name)
+			t.warn("F5SPKVlan %s: no availability zone known for its pool; on Azure the 2.4 controller only counts zoned pools (pass --config so azrbnkctl reads network.dataPath)", name)
 		}
 		ipamName := name + "-selfip"
 		t.addIpam(ipamName, pools)

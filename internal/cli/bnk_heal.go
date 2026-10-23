@@ -41,8 +41,8 @@ Repairs (--only <name> limits the run):
                              start unless started with --cleanup-config-on-exit;
                              the expired token fails every new pod with
                              "Multus ... Unauthorized" (TMM stays Pending)
-  metrics-server         -f  metrics-server EKS add-on: metrics.k8s.io for
-                             kubectl top and the Forge fleet view
+  metrics-server         -f  metrics-server in AKS / kube-system: metrics.k8s.io
+                             for kubectl top and the Forge fleet view
   tmm-log-stream             f5-toda-fluentd stdout store, so logs tmm
                              --governance and the Loki collector see TMM lines
   pod-manager                f5-tmm-pod-manager gRPC client cert mount and the
@@ -52,8 +52,8 @@ Repairs (--only <name> limits the run):
                              (hostname check blocks the replica on cold start)
   controller-endpointslices  -f  ClusterRole so the 2.4 controller can read
                              EndpointSlices (FLO 2.30 omits it)
-  controller-irsa        -f  IRSA trust policy and ServiceAccount annotation
-                             for the controller (cloud provider, Gateway VIPs)
+  controller-identity    -f  Azure Workload Identity client-id annotation on the
+                             controller ServiceAccount (cloud provider, Gateway VIPs)
   tmm-k8s-routes         -f  TMM_K8S_ROUTES=<service CIDR> on the CNEInstance
                              so the TMM pod reaches the service network (dSSM,
                              DNS, the fluentd log forward); on 2.3 detected from
@@ -63,7 +63,7 @@ Repairs (--only <name> limits the run):
   test-namespace             namespace azrbnkctl-test, where test --backend k8s
                              runs its iperf3 and dns probe Jobs
 
-Repairs marked -f need cluster.yaml (state.env and the AWS clients); with
+Repairs marked -f need cluster.yaml (state.env and the Azure / Kubernetes clients); with
 --kubeconfig alone they are detected and reported, not fixed.`,
 	Example: `  azrbnkctl bnk heal -f clusters/lab/cluster.yaml
   azrbnkctl bnk heal -f clusters/lab/cluster.yaml --dry-run
@@ -74,7 +74,7 @@ Repairs marked -f need cluster.yaml (state.env and the AWS clients); with
 
 func init() {
 	bnkHealCmd.Flags().StringVar(&flagBnkHealKubeconfig, "kubeconfig", "", "explicit kubeconfig path (takes precedence over --config; default: $KUBECONFIG → ~/.kube/config)")
-	bnkHealCmd.Flags().StringVarP(&flagBnkHealConfig, "config", "f", "", "path to cluster.yaml; derives kubeconfig from the cluster's state.env KUBECONFIG_PATH (overridden by --kubeconfig) and enables the repairs that need AWS or state")
+	bnkHealCmd.Flags().StringVarP(&flagBnkHealConfig, "config", "f", "", "path to cluster.yaml; derives kubeconfig from the cluster's state.env KUBECONFIG_PATH (overridden by --kubeconfig) and enables the repairs that need Azure / Kubernetes clients or state")
 	bnkHealCmd.Flags().BoolVar(&flagBnkHealDryRun, "dry-run", false, "report what would change without writing to the cluster")
 	bnkHealCmd.Flags().StringSliceVar(&flagBnkHealOnly, "only", nil, "comma-separated repair names to run (default: all)")
 	bnkCmd.AddCommand(bnkHealCmd)

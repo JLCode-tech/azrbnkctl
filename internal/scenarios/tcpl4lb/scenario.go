@@ -44,10 +44,16 @@ func realVerifyDeps() VerifyDeps {
 		WaitDeploymentAvailableFn: scenarios.WaitDeploymentAvailable,
 		WaitConditionFn:           scenarios.WaitCondition,
 		RunCurlProbesFn: func(ctx context.Context, sctx *scenarios.Context, vip, port string, iterations int, timeout time.Duration) (map[string]int, error) {
-			instanceID := sctx.State.Get("JUMPHOST_INSTANCE_ID")
-			sourceIP := sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+			var instanceID, sourceIP, region string
+			if sctx.State != nil {
+				instanceID = sctx.State.Get("JUMPHOST_INSTANCE_ID")
+				sourceIP = sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+			}
+			if sctx.Cluster != nil {
+				region = sctx.Cluster.Metadata.Location
+			}
 			probeOpts := jumphost.ProbeOptions{
-				Region:     sctx.Cluster.Metadata.Location,
+				Region:     region,
 				InstanceID: instanceID,
 				SourceIP:   sourceIP,
 				VIP:        vip + ":" + port,

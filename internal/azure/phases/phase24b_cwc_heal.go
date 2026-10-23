@@ -71,17 +71,37 @@ func Phase24CWCHeal(ctx context.Context, _ *intent.Cluster, _ *state.State, clie
 
 		elapsed := int(time.Since(start).Seconds())
 
-		// Read the first cwc pod in f5-cne-core.
-		pods, err := clients.K8s.CoreV1().Pods(OperatorNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: cwcLabelSelector,
-			Limit:         1,
-		})
-		if err != nil {
+		// Read the first cwc pod in f5-utils or f5-cne-core.
+		var pods *corev1.PodList
+		var err error
+		targetNS := "f5-utils"
+		for _, ns := range []string{"f5-utils", OperatorNamespace} {
+			for _, sel := range []string{cwcLabelSelector, "app=f5-spk-cwc"} {
+				pList, listErr := clients.K8s.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+					LabelSelector: sel,
+					Limit:         1,
+				})
+				if listErr != nil {
+					err = listErr
+					continue
+				}
+				if len(pList.Items) > 0 {
+					pods = pList
+					targetNS = ns
+					err = nil
+					break
+				}
+			}
+			if pods != nil && len(pods.Items) > 0 {
+				break
+			}
+		}
+		if err != nil && (pods == nil || len(pods.Items) == 0) {
 			fmt.Fprintf(os.Stderr, "[phase 24] warning: listing cwc pods: %v — retrying\n", err)
 			continue
 		}
-		if len(pods.Items) == 0 {
-			fmt.Fprintf(os.Stderr, "[phase 24] no cwc pods found in %s (t=%ds) — retrying\n",
+		if pods == nil || len(pods.Items) == 0 {
+			fmt.Fprintf(os.Stderr, "[phase 24] no cwc pods found in f5-utils or %s (t=%ds) — retrying\n",
 				OperatorNamespace, elapsed)
 			continue
 		}
@@ -99,7 +119,7 @@ func Phase24CWCHeal(ctx context.Context, _ *intent.Cluster, _ *state.State, clie
 				"[phase 24] cwc not Ready: restartCount=%d >= threshold=%d — force-deleting pod %s\n",
 				restartCount, cwcRestartThreshold, pod.Name)
 			gracePeriod := int64(0)
-			delErr := clients.K8s.CoreV1().Pods(OperatorNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{
+			delErr := clients.K8s.CoreV1().Pods(targetNS).Delete(ctx, pod.Name, metav1.DeleteOptions{
 				GracePeriodSeconds: &gracePeriod,
 			})
 			if delErr != nil {

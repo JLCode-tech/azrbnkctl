@@ -24,6 +24,92 @@ import (
 // DefaultSSHUser is the default Linux username on Azure jumphost instances.
 const DefaultSSHUser = "azureuser"
 
+// DefaultProbePod is the default in-cluster netshoot probe pod name.
+const DefaultProbePod = "test-probe"
+
+// DefaultProbeNamespace is the default namespace for the in-cluster probe pod.
+const DefaultProbeNamespace = "default"
+
+func isNamedPodRunning(pod, ns string) bool {
+	return isNamedPodRunningInProcess(pod, ns)
+}
+
+func findTMMProbePod() string {
+	return findTMMProbePodInProcess()
+}
+
+func probePodName() string {
+	if pod := os.Getenv("AZRBNKCTL_PROBE_POD"); pod != "" {
+		if pod == "auto" || pod == "tmm" || pod == "f5-tmm" {
+			if tmmPod := findTMMProbePod(); tmmPod != "" {
+				return tmmPod
+			}
+		}
+		return pod
+	}
+	if !isNamedPodRunning(DefaultProbePod, DefaultProbeNamespace) {
+		if tmmPod := findTMMProbePod(); tmmPod != "" {
+			return tmmPod
+		}
+	}
+	return DefaultProbePod
+}
+
+func probePodNamespace() string {
+	if ns := os.Getenv("AZRBNKCTL_PROBE_NAMESPACE"); ns != "" {
+		return ns
+	}
+	if pod := os.Getenv("AZRBNKCTL_PROBE_POD"); pod == "auto" || pod == "tmm" || pod == "f5-tmm" {
+		return "f5-cne-system"
+	}
+	if !isNamedPodRunning(DefaultProbePod, DefaultProbeNamespace) && findTMMProbePod() != "" {
+		return "f5-cne-system"
+	}
+	return DefaultProbeNamespace
+}
+
+func probePodContainer() string {
+	if c := os.Getenv("AZRBNKCTL_PROBE_CONTAINER"); c != "" {
+		return c
+	}
+	if strings.HasPrefix(probePodName(), "f5-tmm") {
+		return "debug"
+	}
+	return ""
+}
+
+// IsProbePodRunning checks if the in-cluster probe pod is available and running using in-process client-go.
+func IsProbePodRunning(_ context.Context) bool {
+	pod := probePodName()
+	ns := probePodNamespace()
+	return isNamedPodRunningInProcess(pod, ns)
+}
+
+// ProbePodIP returns the IP address of the in-cluster probe pod if running, or "" if unavailable.
+func ProbePodIP(ctx context.Context) string {
+	pod := probePodName()
+	ns := probePodNamespace()
+	return probePodIPInProcess(ctx, pod, ns)
+}
+
+func execInProbe(ctx context.Context, cmdStr string) (string, error) {
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
+	}
+	return runner.Run(ctx, cmdStr, nil)
+}
+
+func execInProbeWithStdin(ctx context.Context, cmdStr string, stdin io.Reader) (string, error) {
+	runner := &PodExecRunner{
+		Namespace: probePodNamespace(),
+		PodName:   probePodName(),
+		Container: probePodContainer(),
+	}
+	return runner.Run(ctx, cmdStr, stdin)
+}
+
 // ProbeOptions configures a jumphost curl probe run.
 type ProbeOptions struct {
 	// Location is the Azure location / region (e.g. "eastus2").
@@ -179,10 +265,9 @@ func prepareEICEKey(ctx context.Context, region, instanceID string) (keyPath, pu
 	return keyFile.Name(), pubFile.Name(), cleanupFn, nil
 }
 
-// buildSSHArgs constructs SSH arguments supporting direct SSH (user@targetHost),
-// Azure Bastion proxy commands (az network bastion tunnel --target-resource-id ...),
-// and legacy AWS EICE fallback.
-func buildSSHArgs(user, targetHost, keyPath string, useBastion bool, resourceID, location, remoteCmd string) []string {
+// buildSSHArgs constructs SSH arguments supporting direct SSH (user@targetHost)
+// and Azure Bastion proxy commands (az network bastion tunnel --target-resource-id ...).
+func buildSSHArgs(user, targetHost, keyPath string, useBastion bool, resourceID, _ string, remoteCmd string) []string {
 	var args []string
 	if resourceID == "" && strings.HasPrefix(targetHost, "/subscriptions/") {
 		resourceID = targetHost
@@ -193,9 +278,6 @@ func buildSSHArgs(user, targetHost, keyPath string, useBastion bool, resourceID,
 			proxy := fmt.Sprintf("ProxyCommand=az network bastion tunnel --target-resource-id %s --resource-port 22", resourceID)
 			args = append(args, "-o", proxy)
 		}
-	} else if strings.HasPrefix(targetHost, "i-") {
-		proxy := fmt.Sprintf("ProxyCommand=aws ec2-instance-connect open-tunnel --instance-id %s --region %s", targetHost, location)
-		args = append(args, "-o", proxy)
 	}
 
 	args = append(args,
@@ -219,8 +301,9 @@ func buildSSHArgs(user, targetHost, keyPath string, useBastion bool, resourceID,
 	return args
 }
 
-// RunCurlProbes mints an ephemeral SSH key (or uses opts.SSHKeyPath), pushes it,
-// then runs opts.Iterations curls from the jumphost. Returns per-iteration results.
+// RunCurlProbes runs opts.Iterations curls. If an in-cluster probe pod is available
+// (or AZRBNKCTL_PROBE_IN_CLUSTER is set), curls execute via kubectl exec on the probe pod;
+// otherwise it mints an ephemeral SSH key (or uses opts.SSHKeyPath) and curls from the jumphost.
 func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error) {
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
@@ -232,6 +315,34 @@ func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error
 	loc := opts.EffectiveLocation()
 	vm := opts.EffectiveVMName()
 	targetHost := opts.TargetHost()
+
+	useProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		results := make([]ProbeResult, 0, opts.Iterations)
+		remoteCmd := buildCurlCmd("", opts.VIP, opts.Hostname, int(opts.Timeout.Seconds()))
+		for i := 1; i <= opts.Iterations; i++ {
+			out, perr := execInProbe(ctx, remoteCmd)
+			res := ProbeResult{Iteration: i}
+			if perr != nil {
+				res.Err = perr.Error()
+			}
+			parts := strings.Fields(out)
+			if len(parts) >= 2 {
+				var code int
+				var secs float64
+				_, _ = fmt.Sscanf(parts[0], "%d", &code)
+				_, _ = fmt.Sscanf(parts[1], "%f", &secs)
+				res.HTTPCode = code
+				res.Seconds = secs
+			} else if len(parts) == 1 {
+				var code int
+				_, _ = fmt.Sscanf(parts[0], "%d", &code)
+				res.HTTPCode = code
+			}
+			results = append(results, res)
+		}
+		return results, nil
+	}
 
 	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
@@ -254,29 +365,9 @@ func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error
 	return results, nil
 }
 
-// PushSSHPublicKey sends/updates the public key on the target VM.
-// On Azure, it updates the VM user key via `az vm user update` if available,
-// or gracefully no-ops when the CLI isn't available.
-// On AWS instances (instanceID starting with "i-"), it falls back to EC2 Instance Connect.
-func PushSSHPublicKey(ctx context.Context, region, instanceID, pubKeyPath string) error {
-	if strings.HasPrefix(instanceID, "i-") {
-		if _, err := exec.LookPath("aws"); err != nil {
-			return nil
-		}
-		args := []string{
-			"ec2-instance-connect", "send-ssh-public-key",
-			"--instance-id", instanceID,
-			"--instance-os-user", DefaultSSHUser,
-			"--ssh-public-key", "file://" + pubKeyPath,
-			"--region", region,
-		}
-		cmd := exec.CommandContext(ctx, "aws", args...) // #nosec G204 -- fixed aws subcommand with controlled args
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		_ = cmd.Run()
-		return nil
-	}
-
+// PushSSHPublicKey sends/updates the public key on the target Azure VM via
+// `az vm user update` if available, or gracefully no-ops when the CLI isn't available.
+func PushSSHPublicKey(ctx context.Context, _ string, instanceID, pubKeyPath string) error {
 	if _, err := exec.LookPath("az"); err != nil {
 		// CLI not available; gracefully no-op.
 		return nil
@@ -317,6 +408,12 @@ func PushSSHPublicKey(ctx context.Context, region, instanceID, pubKeyPath string
 	return nil
 }
 
+// BuildCurlCmd returns the remote curl command. When host is non-empty it
+// adds -H 'Host: <host>' so requests match hostname-scoped HTTPRoutes.
+func BuildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
+	return buildCurlCmd(sourceIP, vip, host, timeoutSecs)
+}
+
 // buildCurlCmd returns the remote curl command. When host is non-empty it
 // adds -H 'Host: <host>' so requests match hostname-scoped HTTPRoutes.
 func buildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
@@ -324,8 +421,12 @@ func buildCurlCmd(sourceIP, vip, host string, timeoutSecs int) string {
 	if host != "" {
 		hostHdr = fmt.Sprintf(`-H 'Host: %s' `, host)
 	}
-	return fmt.Sprintf(`curl -s -o /dev/null -w '%%{http_code} %%{time_total}' %s--interface %s --max-time %d http://%s/`,
-		hostHdr, sourceIP, timeoutSecs, vip)
+	ifaceHdr := ""
+	if sourceIP != "" {
+		ifaceHdr = fmt.Sprintf(`--interface %s `, sourceIP)
+	}
+	return fmt.Sprintf(`curl -s -o /dev/null -w '%%{http_code} %%{time_total}' %s%s--max-time %d http://%s/`,
+		hostHdr, ifaceHdr, timeoutSecs, vip)
 }
 
 // SSHCurlViaEICE opens an SSH connection to the jumphost and runs a single
@@ -382,8 +483,12 @@ func buildCurlBodyCmd(sourceIP, vip, host string, timeoutSecs int) string {
 	if host != "" {
 		hostHdr = fmt.Sprintf(`-H 'Host: %s' `, host)
 	}
-	return fmt.Sprintf(`curl -s -w '\n%%{http_code}' %s--interface %s --max-time %d http://%s/`,
-		hostHdr, sourceIP, timeoutSecs, vip)
+	ifaceHdr := ""
+	if sourceIP != "" {
+		ifaceHdr = fmt.Sprintf(`--interface %s `, sourceIP)
+	}
+	return fmt.Sprintf(`curl -s -w '\n%%{http_code}' %s%s--max-time %d http://%s/`,
+		hostHdr, ifaceHdr, timeoutSecs, vip)
 }
 
 // SSHCurlBodyViaEICE opens an SSH connection to the jumphost and runs a single body-capturing curl.
@@ -423,8 +528,7 @@ func sshCurlBodyProbe(ctx context.Context, opts ProbeOptions, keyPath, targetHos
 	return bodyStr, httpCode, nil
 }
 
-// RunCurlBodyProbes mints an ephemeral SSH key (or uses opts.SSHKeyPath), pushes it,
-// then runs opts.Iterations body-capturing curls from the jumphost.
+// RunCurlBodyProbes runs opts.Iterations body-capturing curls from the jumphost or probe pod.
 func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResult, error) {
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
@@ -436,6 +540,37 @@ func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResul
 	loc := opts.EffectiveLocation()
 	vm := opts.EffectiveVMName()
 	targetHost := opts.TargetHost()
+
+	useProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		results := make([]BodyProbeResult, 0, opts.Iterations)
+		remoteCmd := buildCurlBodyCmd("", opts.VIP, opts.Hostname, int(opts.Timeout.Seconds()))
+		for i := 1; i <= opts.Iterations; i++ {
+			raw, perr := execInProbe(ctx, remoteCmd)
+			res := BodyProbeResult{Iteration: i}
+			if perr != nil {
+				res.Err = perr.Error()
+			}
+			lastNL := strings.LastIndex(raw, "\n")
+			if lastNL >= 0 {
+				res.Body = strings.TrimSpace(raw[:lastNL])
+				codeStr := strings.TrimSpace(raw[lastNL+1:])
+				var httpCode int
+				if _, parseErr := fmt.Sscanf(codeStr, "%d", &httpCode); parseErr == nil {
+					res.HTTPCode = httpCode
+				}
+			} else if raw != "" {
+				var httpCode int
+				if _, parseErr := fmt.Sscanf(strings.TrimSpace(raw), "%d", &httpCode); parseErr == nil {
+					res.HTTPCode = httpCode
+				} else {
+					res.Body = strings.TrimSpace(raw)
+				}
+			}
+			results = append(results, res)
+		}
+		return results, nil
+	}
 
 	keyPath, pubKeyPath, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
@@ -507,8 +642,35 @@ func buildHTTPResponderStopCmd(port int) string {
 	return fmt.Sprintf(`sudo systemctl stop %s 2>/dev/null; sudo systemctl reset-failed %s 2>/dev/null; true`, unit, unit)
 }
 
-// StartHTTPResponder starts a backgrounded python3 HTTP server on the jumphost.
+// buildProbeHTTPResponderCmd returns the command that writes marker and runs python3 http.server inside a probe container.
+func buildProbeHTTPResponderCmd(port int, marker string) string {
+	q := shellSingleQuote(marker)
+	dir := fmt.Sprintf("/tmp/azrbnkctl-extpool-%d", port)
+	return fmt.Sprintf(
+		`mkdir -p %s && printf '%%s' %s > %s/index.html && pkill -f '\[p\]ython3 -m http.server %d' 2>/dev/null || true; nohup python3 -m http.server %d --directory %s </dev/null >/dev/null 2>&1 & sleep 1; curl -s -o /dev/null -w '%%{http_code}' http://127.0.0.1:%d/`,
+		dir, q, dir, port, port, dir, port,
+	)
+}
+
+// buildProbeHTTPResponderStopCmd returns the command that stops python3 http.server inside a probe container.
+func buildProbeHTTPResponderStopCmd(port int) string {
+	return fmt.Sprintf(`pkill -f '\[p\]ython3 -m http.server %d' 2>/dev/null || true`, port)
+}
+
+// StartHTTPResponder starts a backgrounded python3 HTTP server on the jumphost or in-cluster probe pod.
 func StartHTTPResponder(ctx context.Context, opts ProbeOptions, port int, marker string) error {
+	useProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		out, runErr := execInProbe(ctx, buildProbeHTTPResponderCmd(port, marker))
+		if runErr != nil {
+			return fmt.Errorf("starting HTTP responder on :%d: %w (probe stdout: %q)", port, runErr, out)
+		}
+		if strings.TrimSpace(out) != "200" {
+			return fmt.Errorf("HTTP responder on :%d did not return 200 (probe stdout: %q)", port, out)
+		}
+		return nil
+	}
+
 	keyPath, _, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err
@@ -525,8 +687,14 @@ func StartHTTPResponder(ctx context.Context, opts ProbeOptions, port int, marker
 	return nil
 }
 
-// StopHTTPResponder kills any python3 http.server on port on the jumphost.
+// StopHTTPResponder kills any python3 http.server on port on the jumphost or in-cluster probe pod.
 func StopHTTPResponder(ctx context.Context, opts ProbeOptions, port int) error {
+	useProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || IsProbePodRunning(ctx))
+	if useProbe {
+		_, _ = execInProbe(ctx, buildProbeHTTPResponderStopCmd(port))
+		return nil
+	}
+
 	keyPath, _, cleanup, err := prepareProbeKey(ctx, opts)
 	if err != nil {
 		return err

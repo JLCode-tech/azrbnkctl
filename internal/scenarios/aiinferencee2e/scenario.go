@@ -540,16 +540,20 @@ func runVLLMSSEProbe(ctx context.Context, sctx *scenarios.Context, vip string) (
 	if vip == "" {
 		return false, false, "VIP not set — cannot probe"
 	}
-	if sctx.State == nil {
+	hasProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx))
+	if sctx.State == nil && !hasProbe {
 		return false, false, "scenario state not available"
 	}
-	instanceID := sctx.State.Get("JUMPHOST_INSTANCE_ID")
-	sourceIP := sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+	var instanceID, sourceIP string
+	if sctx.State != nil {
+		instanceID = sctx.State.Get("JUMPHOST_INSTANCE_ID")
+		sourceIP = sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+	}
 	region := ""
 	if sctx.Cluster != nil {
 		region = sctx.Cluster.Metadata.Location
 	}
-	if instanceID == "" || sourceIP == "" || region == "" {
+	if !hasProbe && (instanceID == "" || sourceIP == "" || region == "") {
 		return false, false, "jumphost state not available (JUMPHOST_INSTANCE_ID / JUMPHOST_BNK_EXT_ENI_IP / region)"
 	}
 
@@ -564,10 +568,14 @@ func runVLLMSSEProbe(ctx context.Context, sctx *scenarios.Context, vip string) (
 
 	// Streaming completion request body — minimal tokens so the probe completes quickly.
 	reqBody := `{"model":"llama3","messages":[{"role":"user","content":"Say hello."}],"stream":true,"max_tokens":32}`
+	ifaceArg := ""
+	if sourceIP != "" {
+		ifaceArg = fmt.Sprintf("--interface %s ", sourceIP)
+	}
 	// Remote curl: output SSE body on stdout, HTTP code as the final line.
 	remoteCmd := fmt.Sprintf(
-		`curl -s -N --no-buffer --interface %s -H 'Host: %s' -H 'Content-Type: application/json' -H 'Accept: text/event-stream' -d %s -w '\n%%{http_code}' http://%s/v1/chat/completions`,
-		sourceIP, scnHostname,
+		`curl -s -N --no-buffer %s-H 'Host: %s' -H 'Content-Type: application/json' -H 'Accept: text/event-stream' -d %s -w '\n%%{http_code}' http://%s/v1/chat/completions`,
+		ifaceArg, scnHostname,
 		shellSingleQuote(reqBody),
 		vip,
 	)
@@ -679,7 +687,14 @@ func ensureFARSecret(ctx *scenarios.Context, ns string) error {
 		return nil
 	}
 	secrets := ctx.Clientset.CoreV1()
-	src, err := secrets.Secrets("f5-cne-system").Get(ctx.Ctx, farSecretName, metav1.GetOptions{})
+	var src *corev1.Secret
+	var err error
+	for _, srcNS := range []string{"f5-cne-system", "f5-cne-core", "f5-utils"} {
+		src, err = secrets.Secrets(srcNS).Get(ctx.Ctx, farSecretName, metav1.GetOptions{})
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return err
 	}

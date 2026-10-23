@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
@@ -62,14 +63,11 @@ var (
 		}
 		return migrate.NewDynamicApplier(cfg)
 	}
-	// bnkUpgradeIdentity re-binds the CNE controller IRSA role after the rollout
-	// (phase 21): the 2.3.x controller ran as
-	// f5-cne-controller-<instance>-serviceaccount, the 2.4 controller as
-	// f5-cne-controller, so the trust policy and the SA annotation must move or
-	// the controller starts without a cloud provider ("IRSA env not found") and
-	// cannot allocate Gateway VIPs. Only for clusters azrbnkctl provisioned
-	bnkUpgradeIdentity = func(ctx context.Context, cl *intent.Cluster, st *state.State, kubeconfigPath string) error {
-		return nil
+	// bnkUpgradeIdentity verifies and repairs the CNE controller Azure Managed
+	// Identity / Workload Identity ServiceAccount annotations and labels after
+	// the rollout: only for clusters azrbnkctl provisioned (AZURE_AKS_CLUSTER_NAME in state.env).
+	bnkUpgradeIdentity = func(ctx context.Context, _ *intent.Cluster, st *state.State, kubeconfigPath string) error {
+		return ensureAzureWorkloadIdentitySA(ctx, st, kubeconfigPath, flagBnkUpgradeNamespace)
 	}
 	bnkUpgradeDeps = func(kubeconfigPath, farKeyB64 string) (migrate.UpgradeDeps, error) {
 		helm, err := phases.NewHelmInstaller(kubeconfigPath, farKeyB64)
@@ -171,7 +169,7 @@ func init() {
 	u.StringVar(&flagBnkUpgradeInstance, "instance", "", "CNEInstance name (default: the only one in the namespace)")
 	u.BoolVar(&flagBnkUpgradeDryRun, "dry-run", false, "print the three steps without changing anything")
 	u.DurationVar(&flagBnkUpgradeTimeout, "timeout", 20*time.Minute, "bound for each rollout wait")
-	u.StringVar(&flagBnkUpgradeServiceCIDR, "service-cidr", "", "Kubernetes service range TMM keeps reachable over eth0 (TMM env TMM_K8S_ROUTES); default: EKS_SERVICE_CIDR from state.env, else the EKS cluster's serviceIpv4Cidr")
+	u.StringVar(&flagBnkUpgradeServiceCIDR, "service-cidr", "", "Kubernetes service range TMM keeps reachable over eth0 (TMM env TMM_K8S_ROUTES); default: SERVICE_CIDR from state.env, else the AKS cluster's serviceCidr (10.240.0.0/16)")
 
 	bnkCmd.AddCommand(bnkMigrateCmd)
 	bnkCmd.AddCommand(bnkUpgradeCmd)
@@ -323,14 +321,14 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		Log:             os.Stderr,
 	})
 	if err == nil && !flagBnkUpgradeDryRun {
-		// Step 4: IRSA. The controller SA changed name between 2.3.x and 2.4.
-		if st, lerr := state.Load(cl.StateDir()); lerr == nil && st.Get("CNE_IRSA_ROLE_ARN") != "" {
-			fmt.Fprintf(os.Stderr, "[upgrade] step 4: re-binding IRSA role %s to the controller ServiceAccount (phase 21)\n", st.Get("CNE_IRSA_ROLE_NAME"))
+		// Step 4: Azure Managed Identity / Workload Identity.
+		if st, lerr := state.Load(cl.StateDir()); lerr == nil && st.Get("AZURE_AKS_CLUSTER_NAME") != "" {
+			fmt.Fprintf(os.Stderr, "[upgrade] step 4: verifying Azure Managed Identity / Workload Identity for AKS cluster %s (phase 21)\n", st.Get("AZURE_AKS_CLUSTER_NAME"))
 			if ierr := bnkUpgradeIdentity(ctx, cl, st, kubeconfigPath); ierr != nil {
-				err = fmt.Errorf("IRSA re-bind: %w", ierr)
+				err = fmt.Errorf("azure identity re-bind: %w", ierr)
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, "[upgrade] step 4: no CNE_IRSA_ROLE_ARN in state.env (cluster not provisioned by azrbnkctl up); on AWS the 2.4 controller needs IRSA on the f5-cne-controller ServiceAccount to allocate Gateway VIPs")
+			fmt.Fprintln(os.Stderr, "[upgrade] step 4: no AZURE_AKS_CLUSTER_NAME in state.env (cluster not provisioned by azrbnkctl up); on Azure the 2.4 controller uses Azure Managed Identity / Workload Identity on the f5-cne-controller ServiceAccount")
 		}
 		// Step 5: the TMM log stream. FLO 2.30 gives the TMM fluentbit sidecar no
 		// stdout output; the f5-toda-fluentd stdout store carries the TMM lines
@@ -353,7 +351,7 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		res.Readiness = upgradeReadiness(ctx, deps, flagBnkUpgradeNamespace, os.Stderr)
 	}
 	if err == nil && flagBnkUpgradeDryRun {
-		fmt.Fprintln(os.Stderr, "[upgrade] step 4: dry-run: would re-bind the CNE controller IRSA role to the f5-cne-controller ServiceAccount (phase 21) when CNE_IRSA_ROLE_ARN is in state.env")
+		fmt.Fprintln(os.Stderr, "[upgrade] step 4: dry-run: would verify the CNE controller Azure Managed Identity / Workload Identity (phase 21) when AZURE_AKS_CLUSTER_NAME is in state.env")
 	}
 	if res != nil && flagOutput == "json" {
 		if encErr := json.NewEncoder(cmd.OutOrStdout()).Encode(res); encErr != nil && err == nil {
@@ -437,4 +435,56 @@ var bnkUpgradeServiceCIDR = func(ctx context.Context, cl *intent.Cluster, flag s
 		return st.Get(phases.ServiceCIDRStateKey), ""
 	}
 	return "", ""
+}
+
+func ensureAzureWorkloadIdentitySA(ctx context.Context, st *state.State, kubeconfigPath, ns string) error {
+	if ns == "" {
+		ns = migrate.DefaultInstanceNamespace
+	}
+	clientID := ""
+	if st != nil {
+		clientID = st.Get("AZURE_CLIENT_ID")
+		if clientID == "" {
+			clientID = st.Get("AZURE_IDENTITY_CLIENT_ID")
+		}
+	}
+	if clientID == "" {
+		clientID = os.Getenv("AZURE_CLIENT_ID")
+	}
+	if clientID == "" {
+		return nil
+	}
+	cfg, err := k8s.BuildRESTConfig(kubeconfigPath)
+	if err != nil {
+		return err
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	return reconcileAzureWorkloadIdentitySA(ctx, cs, ns, clientID)
+}
+
+func reconcileAzureWorkloadIdentitySA(ctx context.Context, cs kubernetes.Interface, ns, clientID string) error {
+	if ns == "" {
+		ns = migrate.DefaultInstanceNamespace
+	}
+	if clientID == "" {
+		return nil
+	}
+	sa, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, render.CNEControllerServiceAccount, metav1.GetOptions{})
+	if err != nil {
+		return nil // non-fatal if SA is managed differently
+	}
+	if sa.Annotations == nil {
+		sa.Annotations = map[string]string{}
+	}
+	if sa.Labels == nil {
+		sa.Labels = map[string]string{}
+	}
+	sa.Annotations["azure.workload.identity/client-id"] = clientID
+	sa.Annotations["azure.workload.identity/use"] = "true"
+	sa.Labels["azure.workload.identity/use"] = "true"
+	_, err = cs.CoreV1().ServiceAccounts(ns).Update(ctx, sa, metav1.UpdateOptions{})
+	return err
 }

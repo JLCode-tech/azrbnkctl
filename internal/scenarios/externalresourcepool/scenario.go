@@ -34,6 +34,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -289,7 +290,8 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 
 	instanceID := ctx.State.Get("JUMPHOST_INSTANCE_ID")
 	sourceIP := ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
-	if instanceID == "" || sourceIP == "" {
+	hasProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
+	if !hasProbe && (instanceID == "" || sourceIP == "") {
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
 			Description: "jumphost state keys present",
 			OK:          false,
@@ -317,9 +319,9 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 }
 
 func (s *scenario) Cleanup(ctx *scenarios.Context) error {
-	// Best-effort: stop the jumphost responder. Requires the jumphost state
-	// keys; if absent we simply skip (nothing was started).
-	if ctx.State != nil && ctx.State.Get("JUMPHOST_INSTANCE_ID") != "" {
+	// Best-effort: stop the jumphost or probe-pod responder.
+	hasProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
+	if (ctx.State != nil && ctx.State.Get("JUMPHOST_INSTANCE_ID") != "") || hasProbe {
 		opts := probeOptionsFrom(ctx, "")
 		_ = jumphost.StopHTTPResponder(ctx.Ctx, opts, responderPort)
 	}
@@ -379,13 +381,16 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	// Use .102 to avoid colliding with httproutee2e (.100) and http-traffic-split (.101).
 	v.VIP = withLastOctet(vip, strconv.Itoa(102))
 
-	// BackendIP is the off-cluster Pool member — the jumphost's BNK_EXT ENI IP.
-	// Reading state here is allowed (it is NOT k8s I/O).
+	// BackendIP is the off-cluster Pool member — the jumphost's BNK_EXT ENI IP,
+	// or the in-cluster test-probe pod IP when no jumphost is configured.
 	if ctx.State != nil {
 		v.BackendIP = ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
 	}
+	if v.BackendIP == "" && os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" {
+		v.BackendIP = jumphost.ProbePodIP(ctx.Ctx)
+	}
 	if v.BackendIP == "" {
-		return v, fmt.Errorf("JUMPHOST_BNK_EXT_ENI_IP empty in state.env — run `azrbnkctl up` with testing.jumphost.enabled=true (the jumphost is this scenario's external Pool backend)")
+		return v, fmt.Errorf("JUMPHOST_BNK_EXT_ENI_IP empty in state.env and no running %s pod found — run `azrbnkctl up` with testing.jumphost.enabled=true (the jumphost is this scenario's external Pool backend)", jumphost.DefaultProbePod)
 	}
 	if v.BackendIP == v.VIP {
 		return v, fmt.Errorf("backend IP (%s) cannot equal Gateway VIP (%s)", v.BackendIP, v.VIP)

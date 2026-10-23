@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -207,10 +208,11 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 	if deps.RunCurlProbesFn != nil {
 		vip, iterations, timeout, probeErr := scenarios.BuildProbeParams(ctx)
 		vip = scenarios.WithLastOctet(vip, "105")
+		hasProbe := os.Getenv("AZRBNKCTL_FORCE_SSH") != "1" && (os.Getenv("AZRBNKCTL_PROBE_IN_CLUSTER") != "" || jumphost.IsProbePodRunning(ctx.Ctx))
 		switch {
 		case probeErr != nil:
 			assertions = append(assertions, scenarios.Assertion{Description: "jumphost probe setup", OK: false, Got: probeErr.Error()})
-		case ctx.State == nil || ctx.State.Get("JUMPHOST_INSTANCE_ID") == "" || ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP") == "":
+		case !hasProbe && (ctx.State == nil || ctx.State.Get("JUMPHOST_INSTANCE_ID") == "" || ctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP") == ""):
 			assertions = append(assertions, scenarios.Assertion{
 				Description: "jumphost state keys present",
 				OK:          false,

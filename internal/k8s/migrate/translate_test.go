@@ -566,3 +566,30 @@ func TestTranslate_NoStaticRoutesGetsDefault(t *testing.T) {
 		t.Errorf("firstHost(bad) = %q", got)
 	}
 }
+
+func TestTranslate_AzureSocketModeInterfaces(t *testing.T) {
+	inv := inventoryFromFixture(t, fixture23)
+	// Replace VLAN interfaces 1.1/1.2 with Azure Socket Mode 0.2/0.3
+	for _, v := range inv.Vlans {
+		name := stringAt(v.Object, "spec", "name")
+		switch name {
+		case "ext-vlan":
+			_ = unstructured.SetNestedStringSlice(v.Object, []string{"0.2"}, "spec", "interfaces")
+		case "int-vlan":
+			_ = unstructured.SetNestedStringSlice(v.Object, []string{"0.3"}, "spec", "interfaces")
+		}
+	}
+	plan, err := Translate(inv, Options{ZoneByNetwork: fixtureZones})
+	if err != nil {
+		t.Fatalf("Translate: %v", err)
+	}
+	attach := slice(t, plan.Infra.Object, "spec", "networkAttachments")
+	extNADs := entry(t, attach, "ext-vlan-attach")["networkAttachmentDefinitions"].([]any)
+	if len(extNADs) != 1 || extNADs[0].(map[string]any)["name"] != "external-netdevice" {
+		t.Errorf("ext-vlan-attach NADs = %v, want external-netdevice", extNADs)
+	}
+	intNADs := entry(t, attach, "int-vlan-attach")["networkAttachmentDefinitions"].([]any)
+	if len(intNADs) != 1 || intNADs[0].(map[string]any)["name"] != "internal-netdevice" {
+		t.Errorf("int-vlan-attach NADs = %v, want internal-netdevice", intNADs)
+	}
+}

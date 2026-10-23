@@ -16,24 +16,34 @@
 
 ## CLI Command Parity Matrix
 
-| Subcommand | `awsbnkctl` | `gkebnkctl` | `roksbnkctl` | `ocibnkctl` | `azrbnkctl` |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| `init` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `validate` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `doctor` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `up` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `down` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `kubeconfig` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `k` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `test dns` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `test connectivity`| ✓ | ✓ | ✓ | ✓ | ✓ |
-| `test egress` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `manifest probe` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `journal` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `agent` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `bnkforge` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `self` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `version` | ✓ | ✓ | ✓ | ✓ | ✓ |
+All 24 top-level commands in `azrbnkctl` and their parity across the `*bnkctl` family:
+
+| Subcommand | Purpose | `awsbnkctl` | `gkebnkctl` | `roksbnkctl` | `ocibnkctl` | `azrbnkctl` |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| `init` | Generate starter `cluster.yaml` intent file | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `validate` | Validate `cluster.yaml` schema, CIDRs, and version gates | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `up` | Provision cloud + AKS/K8s + BNK 2.4 stack (27 phases) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `down` | Destroy cluster and managed network resources | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `status` | Inspect Azure / AKS / BNK / Forge readiness | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `logs` | Stream TMM, controller, CWC, FLO, or governance logs | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `get` | Shorthand alias for `azrbnkctl k get` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `k` | Embedded `client-go` Kubernetes CLI (`get`, `apply`, `describe`, `delete`, `logs`, `exec`, `port-forward`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `doctor` | Preflight + live cluster readiness and heal diagnostics | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `test` | Data-plane verification (`connectivity`, `dns`, `egress`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `scenarios` | End-to-end BNK 2.4 traffic & AI gateway scenarios (`list`, `run`, `verify`, `clean`, `load`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `benchmark` | Run `aiperf` benchmarks from the in-VNet jumphost against BNK VIPs | ✓ | ✓ | — | — | ✓ |
+| `bnk` | Day-2 BNK operations (`status`, `heal`, `upgrade`, `migrate-2.4`, `mcp-session`, `troubleshoot`) | ✓ | ✓ | — | — | ✓ |
+| `forge` | BNK Forge integration (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `bnkforge` | Backward-compatibility alias for `forge` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `topology` | Discover and print live BNK data-plane / node / VF topology | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `manifest` | Inspect and probe F5 FAR release manifests (`list`, `show`, `probe`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `journal` | Append-only operational journal (`add`, `list`, `show`, `path`, `clear`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `agent` | Launch AI coding assistant with cluster context (`claude`, `gemini`, `opencode`, `cursor`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `install` | Install `azrbnkctl` into `$PATH` (`/usr/local/bin` or `~/.local/bin`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `self` | Self-inspection and in-place GitHub Release binary upgrade (`info`, `update`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `version` | Print version, commit, and build date | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `completion` | Generate shell completion scripts (`bash`, `zsh`, `fish`, `powershell`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `help` | Built-in command help | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ---
 

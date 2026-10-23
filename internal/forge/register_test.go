@@ -333,6 +333,35 @@ func TestRegister_PendingLinkFallsThrough(t *testing.T) {
 	}
 }
 
+func TestRegister_ConflictReusesProjectAndNeverDeletesPreExistingOnClusterFail(t *testing.T) {
+	f := newScriptedForge()
+	f.responses["create_project"] = `{"ok":false,"error":"PROJECT_CONFLICT: project already exists"}`
+	f.responses["list_projects"] = `{"projects":[{"id":77,"name":"awsbnkctl-default"}]}`
+	f.responses["create_cluster"] = `{"ok":false,"error":"cluster registration failed"}`
+	srv := httptest.NewServer(http.HandlerFunc(f.handler))
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/mcp/")
+	dir := t.TempDir()
+	_, err := Register(context.Background(), c, RegisterRequest{
+		WorkspaceName: "default",
+		WorkspaceDir:  dir,
+		ProjectName:   "awsbnkctl-default",
+		ClusterName:   "bnk-prod",
+		Region:        "us-east-1",
+		Kubeconfig:    []byte("apiVersion: v1\nkind: Config\n"),
+	})
+	if err == nil {
+		t.Fatal("expected error when create_cluster fails")
+	}
+	got := f.calls()
+	// Must call create_project -> list_projects -> create_cluster, and MUST NOT call delete_project!
+	want := []string{"create_project", "list_projects", "create_cluster"}
+	if !equalSlices(got, want) {
+		t.Errorf("call order = %v, want %v (must not delete pre-existing project on cluster failure)", got, want)
+	}
+}
+
 func equalSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

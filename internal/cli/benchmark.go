@@ -12,8 +12,8 @@ package cli
 //
 // Example:
 //   azrbnkctl forge benchmark \
-//     --region ap-southeast-2 \
-//     --instance-id i-0abc123 \
+//     --region australiaeast \
+//     --instance-id jumphost-vm \
 //     --source-ip 10.0.11.50 \
 //     --vip 10.0.10.100 \
 //     --model meta-llama/Llama-3.1-8B-Instruct \
@@ -139,9 +139,8 @@ pushes the structured result to forge's benchmark ingestion endpoint
 Prerequisites on the jumphost:
   pip install aiperf      # one-time; or pass --ensure-aiperf to auto-install
 
-The jumphost is reached via EC2 Instance Connect (EICE) — the operator's
-IAM principal must have ec2-instance-connect:SendSSHPublicKey permission and
-the aws CLI must be on PATH.
+The jumphost is reached via direct SSH over the Azure jumphost VM public IP
+(JUMPHOST_PUBLIC_IP from state.env).
 
 Use --scenarios to run multiple named presets in sequence:
   --scenarios latency,throughput   run two presets
@@ -395,7 +394,7 @@ func resolveWorkspaceDir() string {
 }
 
 // checkServedModelFn is the injectable seam for CheckServedModel — allows CLI
-// tests to stub out the EICE/SSH preflight without network access.
+// tests to stub out the SSH preflight without network access.
 var checkServedModelFn = jumphost.CheckServedModel
 
 // pushBenchmarkResultFn is the injectable seam for PushBenchmarkResult.
@@ -905,7 +904,7 @@ func runForgeBenchmark(cmd *cobra.Command, _ []string) error {
 	// Step 0a: optionally register jumphost as forge SSH access-method.
 	accessMethodName := fmt.Sprintf("azrbnkctl-jumphost-%s", flagBenchInstanceID)
 	if flagBenchRegisterAccessMethod {
-		fmt.Fprintln(os.Stderr, "→ Registering jumphost as forge SSH access-method (record-only / EICE)")
+		fmt.Fprintln(os.Stderr, "→ Registering jumphost as forge SSH access-method (record-only / SSH via JUMPHOST_PUBLIC_IP)")
 		amResp, amErr := forge.RegisterJumphostAccessMethod(cmd.Context(), forge.AccessMethodOptions{
 			RestURL:    flagBenchForgeURL,
 			Creds:      forgeCreds,
@@ -1396,7 +1395,10 @@ func runNativeScenarioCollect(
 		fmt.Fprintf(os.Stderr, "\n── child: %s label=%s ──\n", child.VariantLabel, label)
 
 		cfg := child.Config
-		if cfg.SeqDist != "" {
+		if cfg.Scenario != "" {
+			fmt.Fprintf(os.Stderr, "→ Running aiperf (scenario=%q dataset=%q request-rate=%g max-context=%d)\n",
+				cfg.Scenario, cfg.PublicDataset, cfg.RequestRate, cfg.MaxContextLength)
+		} else if cfg.SeqDist != "" {
 			fmt.Fprintf(os.Stderr, "→ Running aiperf (concurrency=%d requests=%d seq-dist=%q stream=%v)\n",
 				cfg.Concurrency, cfg.NumRequests, cfg.SeqDist, cfg.Streaming)
 		} else {
