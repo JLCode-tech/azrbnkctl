@@ -50,6 +50,7 @@ func Phase34CNEInstance(ctx context.Context, cl *intent.Cluster, st *state.State
 		ExtPCI:             extPCI,
 		IntPCI:             intPCI,
 		Telemetry:          cl.Bnk.Telemetry,
+		AIGateway:          cl.Bnk.AIGateway != nil && cl.Bnk.AIGateway.Enabled,
 		PalCpuSet:          palCpuSet,
 		NetworkAttachments: nads,
 		SkipNics:           "eth0",

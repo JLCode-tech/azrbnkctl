@@ -120,7 +120,7 @@ mcp = FastMCP("finance-tool")
 @mcp.tool()
 def forecast(symbol: str, days: int = 30) -> str:
     """Provides a simple financial forecast for a symbol."""
-    growth = random.randint(5, 20)
+    growth = (abs(hash(f"{symbol}:{days}")) % 16) + 5
     return f"Forecast for {symbol} over {days} days: up (expected growth: {growth}%)."
 
 

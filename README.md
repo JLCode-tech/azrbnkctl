@@ -1,6 +1,6 @@
 # azrbnkctl
 
-![BNK](https://img.shields.io/badge/BNK-2.4.0-0a3a5c)
+![BNK](https://img.shields.io/badge/BNK-2.4.1%20%7C%202.4.0-0a3a5c)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-1.32--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![Azure AKS](https://img.shields.io/badge/Azure-AKS-0078d4?logo=microsoftazure&logoColor=white)
 [![CI](https://github.com/JLCode-tech/azrbnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/azrbnkctl/actions/workflows/ci.yml)
@@ -12,13 +12,14 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ---
 
-`azrbnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on Azure Kubernetes Service (AKS). From a single declarative `cluster.yaml`, it provisions the Azure VNet, NAT Gateway, AKS cluster, Accelerated Networking SR-IOV / secondary data-plane NICs, Multus CNI attachments, hugepages, and the full F5 BNK 2.4 software stack. It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **AI agent governance walkthroughs** (`examples/agentfoundry-demo/`).
+`azrbnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on Azure Kubernetes Service (AKS). From a single declarative `cluster.yaml`, it provisions the Azure VNet, NAT Gateway, AKS cluster, Accelerated Networking SR-IOV / secondary data-plane NICs, Multus CNI attachments, hugepages, and the full F5 BNK 2.4 / 2.4.1 software stack (including the native **BNK 2.4.1 AI Gateway**, **vLLM Semantic Router**, and **DSSM Token Governance**). It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **AI agent governance walkthroughs** (`examples/agentfoundry-demo/`).
 
 ---
 
 ## Table of Contents
 
 - [Why azrbnkctl?](#why-azrbnkctl)
+- [What You Can Build with azrbnkctl + BNK Forge](#what-you-can-build-with-azrbnkctl--bnk-forge)
 - [System Architecture & Network Topology](#system-architecture--network-topology)
 - [AI Inference Benchmarking & Comparative Shootouts](#ai-inference-benchmarking--comparative-shootouts)
 - [15 Built-in Validation Scenarios](#15-built-in-validation-scenarios)
@@ -47,6 +48,42 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on Azure typically requires coordi
 - **Built-in Diagnostics & Healing**: The `azrbnkctl bnk heal` command detects and automatically remediates 11 common Kubernetes plumbing issues (Multus token expiration, metrics-server bindings, TMM log streams, EndpointSlice RBAC, and Azure Workload Identity `controller-identity`).
 - **In-VNet Validation**: 15 built-in automated test scenarios validate L4/L7 routing, canary splits, gRPC streams, and AI inference directly inside the Azure VNet.
 - **Clean Teardown**: Tag-driven resource discovery ensures `azrbnkctl down -f cluster.yaml` destroys provisioned AKS and network resources while preserving the Azure Resource Group by default (unless `--delete-rg` is specified).
+
+---
+
+## What You Can Build with `azrbnkctl` + BNK Forge
+
+`azrbnkctl` integrates natively with **BNK Forge** to provide visual control-plane management, Gateway API policy authoring, BNK 2.4.1 Smart LLM Routing, Azure AI Foundry governance, and automated GenAI benchmarking across your Azure AKS clusters.
+
+### 1. Multi-Cloud Fleet & Cluster Lifecycle
+Register Azure AKS clusters directly from `azrbnkctl forge register -f cluster.yaml` to monitor live BNK 2.4 / 2.4.1 control-plane health, TMM data-plane readiness, and multi-cloud fleet topology from a unified console.
+
+| Platform Overview | Multi-Cloud Cluster Fleet |
+|---|---|
+| ![BNK Forge Platform Overview](docs/assets/forge-platform-overview.png) | ![Multi-Cloud Cluster Fleet](docs/assets/forge-multi-cloud-cluster-fleet.png) |
+
+### 2. Visual BNK Gateway & Security Policy Builder
+Author and validate Kubernetes Gateway API resources (`Gateway`, `HTTPRoute`, `L4Route`), F5 BNK `SecPolicy` / `NetPolicy` CRDs, L4 firewall rules, and rate-limiting iRules without hand-writing YAML.
+
+![BNK Policy Builder](docs/assets/forge-bnk-policy-builder.png)
+
+### 3. Smart LLM Router & AI Agent Governance (Azure AI Foundry)
+Deploy the **BNK 2.4.1 AI Gateway** (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`) with weighted primary/fallback Azure AI Foundry pools, vLLM Semantic Router integration, DSSM virtual API keys (`f5vk_...`), token budgets, and real-time MCP tool governance (`azrbnkctl forge governance`).
+
+| Azure AI Foundry LLM Router Pools | Live LLM Router Topology |
+|---|---|
+| ![Azure LLM Router Pools](docs/assets/forge-azure-llm-router-pools.png) | ![LLM Router Topology](docs/assets/forge-llm-router-topology.png) |
+
+| Azure AI Foundry Governance Telemetry | AI Governance Guardrails & Budgets |
+|---|---|
+| ![Azure AI Governance](docs/assets/forge-azure-governance.png) | ![AI Governance Guardrails](docs/assets/forge-ai-governance-guardrails.png) |
+
+### 4. AI Inference Benchmarking & MCP Server Automation
+Run automated `aiperf` concurrency sweeps across F5 BNK, Envoy, HAProxy, and direct NodePort, or expose cluster operations and governance actions to AI agents via the built-in Model Context Protocol (MCP) server.
+
+| GenAI Benchmark Dashboard | MCP Server & Agent Tools |
+|---|---|
+| ![Forge Benchmark Dashboard](docs/assets/forge-benchmark-dashboard.png) | ![Forge MCP Server Tools](docs/assets/forge-mcp-server-tools.png) |
 
 ---
 
@@ -399,10 +436,10 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 
 | Component | Pinned Version | Config Key / Location | Notes |
 |---|:---:|---|---|
-| **F5 BNK Release** | `2.4.0` | `bnk.manifestVersion` | Default (`2.4.0-3.2882.0`). Supports 2.3.x overrides. |
+| **F5 BNK Release** | `2.4.0` / `2.4.1` | `bnk.manifestVersion` | Default `2.4.0` (`2.4.0-3.2882.0`); supports `2.4.1` (`2.4.1-3.2850.1-0.0.9` AI Gateway) and `2.3.x`. |
 | **Kubernetes (AKS)** | `1.34.10` | `cluster.kubernetesVersion` | Validated across `1.32`–`1.35` (preflight rejects < 1.32). |
 | **cert-manager** | `v1.16.1` | Embedded upstream YAML | Applied via `client-go` Server-Side Apply without Helm. |
-| **FLO Chart** | `v2.30.0-0.5.2` | `manifest.KnownReleases` | Paired per release in embedded BNK BOM. |
+| **FLO Chart** | `v2.30.0-0.5.2` / `v2.30.1-0.0.8` | `manifest.KnownReleases` | Paired per release in embedded BNK BOM (`2.4.0` / `2.4.1`). |
 | **Go Runtime** | `1.26` | `go.mod` | Compiled with Azure SDK for Go (`armcontainerservice/v6`, `armnetwork/v6`). |
 
 ---
@@ -418,7 +455,8 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 - **BNK Runtime & Self-Healing**: `bnk` (`heal`, `resync`, `upgrade`, `migrate-2.4`, `mcp-session`), `manifest probe`.
   - `bnk heal`: 11-point automated repair suite resolving `multus-token-watch`, `metrics-server`, `tmm-log-stream`, `pod-manager`, `cwc`, `dssm-probe`, `controller-endpointslices`, `controller-identity`, `tmm-k8s-routes`, `epp-namespaces`, and `test-namespace`.
 - **AI & Benchmarking**: `benchmark` (`setup`, `run`, `list`, `status`, `daemon`).
-- **Fleet & Forge**: `forge` (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`), alias `bnkforge`.
+- **Fleet & Forge**: `forge` (`register`, `status`, `unregister`, `cleanup`, `template`, `scan`, `telemetry`, `benchmark`, `governance`), alias `bnkforge`.
+  - `forge governance`: BNK 2.4.1 AI Gateway & DSSM token governance (`overview`, `remediate`, `test-request`, `bootstrap`).
 - **Agentic Workflow**: `agent` (`gemini`, `claude`, `opencode`, `cursor`, `all`), `journal` (`add`, `list`).
 - **Installation & Maintenance**: `install`, `self` (`check`, `update`), `completion`, `help`.
 

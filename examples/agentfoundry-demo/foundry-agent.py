@@ -39,14 +39,30 @@ TICKER_RE = re.compile(r"\b([A-Z]{1,5})\b")
 
 
 def extract_symbol(prompt: str, fallback: str = "MSFT") -> str:
-    stopwords = {"I", "A", "THE", "FOR", "GET", "ME", "AND", "OF", "IS", "TO", "OVER", "NEXT", "DAYS"}
+    stopwords = {
+        "I",
+        "A",
+        "THE",
+        "FOR",
+        "GET",
+        "ME",
+        "AND",
+        "OF",
+        "IS",
+        "TO",
+        "OVER",
+        "NEXT",
+        "DAYS",
+    }
     for candidate in TICKER_RE.findall(prompt.upper()):
         if candidate not in stopwords:
             return candidate
     return fallback
 
 
-def call_mcp_tool(url: str, host: str, token: str, tool_name: str, arguments: dict) -> dict:
+def call_mcp_tool(
+    url: str, host: str, token: str, tool_name: str, arguments: dict
+) -> dict:
     payload = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -71,54 +87,142 @@ def call_mcp_tool(url: str, host: str, token: str, tool_name: str, arguments: di
         return data
 
 
-def run_mock_flow(prompt: str, url: str, host: str, token: str):
+def call_aigateway(
+    aigw_url: str, aigw_host: str, token: str, model: str, messages: list
+) -> dict:
+    import ssl
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 256,
+    }
+    req = urllib.request.Request(
+        aigw_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Host": aigw_host,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+    print(f"[Agent -> BNK 2.4.1 AI Gateway] Invoking model '{model}' via {aigw_url}...")
+    with urllib.request.urlopen(
+        req, timeout=15, context=ctx if aigw_url.startswith("https://") else None
+    ) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        print(f"[BNK AI Gateway -> Agent] Response {resp.status} OK")
+        return data
+
+
+def run_governed_flow(
+    prompt: str, url: str, host: str, aigw_url: str, aigw_host: str, token: str
+):
     symbol = extract_symbol(prompt)
-    print(f"\n[1. Reason] Azure AI Foundry (australiaeast): Model decided it needs tool 'forecast' for {symbol}")
-    print(f"            tool_call: forecast(symbol='{symbol}', days=30)")
-    
-    print(f"\n[2. Cross & Invoke] Crossing Trust Boundary via F5 BIG-IP Next for Kubernetes (BNK)...")
+    print(
+        f"\n[1. Reason] Azure AI Foundry (australiaeast) via BNK 2.4.1 AI Gateway: Selecting tool 'forecast' for {symbol}"
+    )
+    print(
+        f"\n[2. Cross & Invoke] Crossing Trust Boundary via F5 BIG-IP Next for Kubernetes (BNK 2.4.1)..."
+    )
     res = call_mcp_tool(url, host, token, "forecast", {"symbol": symbol, "days": 30})
-    
-    print(f"\n[3. Narrate] Azure AI Foundry Model synthesizes final response based on BNK-governed tool data:")
-    tool_text = res.get("result", {}).get("content", [{}])[0].get("text", "expected growth: 14%")
-    print(f"            'Based on the latest financial telemetry, {symbol} is projected to trend upward with {tool_text}.'")
+    tool_text = res.get("result", {}).get("content", [{}])[0].get("text", "")
+    print(
+        f"\n[3. Narrate] Calling BNK 2.4.1 AI Gateway ({aigw_url}) to synthesize response from live tool output:"
+    )
+    aigw_res = call_aigateway(
+        aigw_url,
+        aigw_host,
+        token,
+        AZURE_OPENAI_MODEL,
+        [
+            {
+                "role": "system",
+                "content": "You are a financial analysis agent governed by F5 BNK 2.4.1.",
+            },
+            {"role": "user", "content": f"{prompt}\nTool result: {tool_text}"},
+        ],
+    )
+    choices = aigw_res.get("choices") or []
+    content = (
+        choices[0].get("message", {}).get("content", tool_text)
+        if choices
+        else tool_text
+    )
+    print(f"            '{content}'")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Azure AI Foundry Governed Agent Client")
-    parser.add_argument("--prompt", default="Forecast performance for MSFT over next 30 days")
-    parser.add_argument("--mock-llm", action="store_true", default=True, help="Simulate Azure OpenAI step for testing")
+    parser = argparse.ArgumentParser(
+        description="Azure AI Foundry Governed Agent Client (BNK 2.4.1)"
+    )
+    parser.add_argument(
+        "--prompt", default="Forecast performance for MSFT over next 30 days"
+    )
     parser.add_argument("--url", default=DEFAULT_URL, help="BNK MCP endpoint VIP")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Ingress host")
+    parser.add_argument(
+        "--aigw-url",
+        default=os.environ.get(
+            "BNK_AIGW_URL", "https://10.0.17.100:8443/v1/chat/completions"
+        ),
+        help="BNK 2.4.1 AI Gateway endpoint",
+    )
+    parser.add_argument(
+        "--aigw-host",
+        default=os.environ.get("BNK_AIGW_HOST", "aigw.bnk-demo.internal"),
+        help="BNK 2.4.1 AI Gateway host",
+    )
     parser.add_argument("--token", default=DEFAULT_TOKEN, help="Agent Bearer token")
     args = parser.parse_args()
 
-    print(f"=== Azure AI Foundry Agent Demo (Region: australiaeast) ===")
-    print(f"Prompt: \"{args.prompt}\"")
-    print(f"BNK VIP Endpoint: {args.url}")
+    print(f"=== Azure AI Foundry Agent Demo (Region: australiaeast, BNK 2.4.1) ===")
+    print(f'Prompt: "{args.prompt}"')
+    print(f"BNK MCP VIP Endpoint: {args.url}")
+    print(f"BNK AI Gateway VIP:   {args.aigw_url}")
 
-    if args.mock_llm or not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
-        run_mock_flow(args.prompt, args.url, args.host, args.token)
+    if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
+        run_governed_flow(
+            args.prompt, args.url, args.host, args.aigw_url, args.aigw_host, args.token
+        )
     else:
-        # Live Azure OpenAI SDK execution
         import openai
+
         client = openai.AzureOpenAI(
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_key=AZURE_OPENAI_KEY,
             api_version="2024-06-01",
         )
-        print(f"[1. Reason] Calling Azure OpenAI endpoint {AZURE_OPENAI_ENDPOINT} ({AZURE_OPENAI_MODEL})...")
+        print(
+            f"[1. Reason] Calling Azure OpenAI endpoint {AZURE_OPENAI_ENDPOINT} ({AZURE_OPENAI_MODEL})..."
+        )
         symbol = extract_symbol(args.prompt)
-        res = call_mcp_tool(args.url, args.host, args.token, "forecast", {"symbol": symbol, "days": 30})
+        res = call_mcp_tool(
+            args.url, args.host, args.token, "forecast", {"symbol": symbol, "days": 30}
+        )
         print(f"[3. Narrate] Synthesizing response with Azure OpenAI...")
         completion = client.chat.completions.create(
             model=AZURE_OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "You are a financial analysis agent with access to real-time tools via F5 BNK."},
+                {
+                    "role": "system",
+                    "content": "You are a financial analysis agent with access to real-time tools via F5 BNK.",
+                },
                 {"role": "user", "content": args.prompt},
-                {"role": "assistant", "content": f"I obtained tool result: {json.dumps(res)}"},
-                {"role": "user", "content": "Please explain the forecast summary to the user."}
-            ]
+                {
+                    "role": "assistant",
+                    "content": f"I obtained tool result: {json.dumps(res)}",
+                },
+                {
+                    "role": "user",
+                    "content": "Please explain the forecast summary to the user.",
+                },
+            ],
         )
         print(f"\nFinal Response:\n{completion.choices[0].message.content}")
 

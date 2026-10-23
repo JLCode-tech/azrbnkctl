@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -83,6 +84,11 @@ func (r ToolCallResult) Text() string {
 	return b.String()
 }
 
+// UnmarshalToolJSON unmarshals the concatenated text blocks of the tool call result as JSON into dst.
+func (r ToolCallResult) UnmarshalToolJSON(dst any) error {
+	return json.Unmarshal([]byte(r.Text()), dst)
+}
+
 // CallTool performs init+notification+tools/call and returns the tool's result.
 func (c *Client) CallTool(ctx context.Context, name string, args any) (ToolCallResult, error) {
 	if c.endpoint == "" {
@@ -98,12 +104,13 @@ func (c *Client) CallTool(ctx context.Context, name string, args any) (ToolCallR
 			"version": "1.0",
 		},
 	})
-	if _, err := c.post(ctx, "initialize", initParams, true); err != nil {
+	_, sessionID, err := c.post(ctx, "initialize", initParams, true, "")
+	if err != nil {
 		return ToolCallResult{}, fmt.Errorf("mcp init %s: %w", c.endpoint, err)
 	}
 
 	// 2) initialized notification
-	_ = c.notify(ctx, "notifications/initialized", nil)
+	_ = c.notify(ctx, "notifications/initialized", nil, sessionID)
 
 	// 3) tools/call
 	toolParams, err := json.Marshal(map[string]any{
@@ -114,7 +121,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args any) (ToolCallR
 		return ToolCallResult{}, fmt.Errorf("marshal args: %w", err)
 	}
 
-	rawResult, err := c.post(ctx, "tools/call", toolParams, true)
+	rawResult, _, err := c.post(ctx, "tools/call", toolParams, true, sessionID)
 	if err != nil {
 		return ToolCallResult{}, fmt.Errorf("mcp %s: %w", name, err)
 	}
@@ -133,7 +140,7 @@ func (c *Client) nextID() int64 {
 	return c.idCounter.Add(1)
 }
 
-func (c *Client) post(ctx context.Context, method string, params json.RawMessage, needResp bool) (json.RawMessage, error) {
+func (c *Client) post(ctx context.Context, method string, params json.RawMessage, needResp bool, sessionID string) (json.RawMessage, string, error) {
 	reqObj := rpcReq{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -145,42 +152,87 @@ func (c *Client) post(ctx context.Context, method string, params json.RawMessage
 
 	b, err := json.Marshal(reqObj)
 	if err != nil {
-		return nil, err
+		return nil, sessionID, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return nil, sessionID, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	if sessionID != "" {
+		httpReq.Header.Set("Mcp-Session-Id", sessionID)
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return nil, sessionID, err
 	}
 	defer resp.Body.Close()
 
+	if sid := strings.TrimSpace(resp.Header.Get("Mcp-Session-Id")); sid != "" {
+		sessionID = sid
+	}
+
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, sessionID, err
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, string(body))
+		return nil, sessionID, fmt.Errorf("http %d: %s", resp.StatusCode, string(rawBody))
 	}
 
 	if !needResp {
-		return nil, nil
+		return nil, sessionID, nil
 	}
 
 	var rpcRespObj rpcResp
-	if err := json.NewDecoder(resp.Body).Decode(&rpcRespObj); err != nil {
-		return nil, fmt.Errorf("decode json-rpc: %w", err)
+	if err := decodeRPCResponse(rawBody, &rpcRespObj); err != nil {
+		return nil, sessionID, fmt.Errorf("decode json-rpc: %w", err)
 	}
 	if rpcRespObj.Error != nil {
-		return nil, rpcRespObj.Error
+		return nil, sessionID, rpcRespObj.Error
 	}
-	return rpcRespObj.Result, nil
+	return rpcRespObj.Result, sessionID, nil
 }
 
-func (c *Client) notify(ctx context.Context, method string, params json.RawMessage) error {
-	_, err := c.post(ctx, method, params, false)
+func decodeRPCResponse(rawBody []byte, dst *rpcResp) error {
+	trimmed := bytes.TrimSpace(rawBody)
+	if len(trimmed) == 0 {
+		return errors.New("empty response body")
+	}
+	if err := json.Unmarshal(trimmed, dst); err == nil && (dst.JSONRPC != "" || len(dst.Result) > 0 || dst.Error != nil) {
+		return nil
+	}
+	// Fallback: parse Server-Sent Events (text/event-stream) lines starting with "data:"
+	var lastValid *rpcResp
+	for _, line := range strings.Split(string(trimmed), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		var candidate rpcResp
+		if err := json.Unmarshal([]byte(payload), &candidate); err == nil {
+			if len(candidate.Result) > 0 || candidate.Error != nil || candidate.JSONRPC != "" {
+				c := candidate
+				lastValid = &c
+			}
+		}
+	}
+	if lastValid != nil {
+		*dst = *lastValid
+		return nil
+	}
+	return json.Unmarshal(trimmed, dst)
+}
+
+func (c *Client) notify(ctx context.Context, method string, params json.RawMessage, sessionID string) error {
+	_, _, err := c.post(ctx, method, params, false, sessionID)
 	return err
 }

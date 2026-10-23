@@ -29,8 +29,12 @@ venv/
 # --- azrbnkctl-managed cluster state (never commit) ---
 # Per-cluster kubeconfig, IDs cache, state files, ephemeral keys.
 .azrbnkctl/
+.bnkctl/
+workspaces/
 artifacts/
 clusters/
+state.env
+forge_link.json
 
 # --- BNK supply-chain & cloud credentials (never commit) ---
 # Operator-supplied per cluster.yaml; grant FAR pull + license rights.
@@ -41,6 +45,7 @@ keys/
 *.tgz
 *.tar.gz
 cne_pull_64.json
+*pull*.json
 *.pem
 *.key
 *.crt
@@ -48,6 +53,7 @@ cne_pull_64.json
 *.p12
 *.kubeconfig
 kubeconfig*
+*kubeconfig*
 
 # --- Local environment overrides ---
 .env

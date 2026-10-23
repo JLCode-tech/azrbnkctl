@@ -30,13 +30,16 @@ cluster:
     acceleratedNetworking: true
 
 bnk:
-  manifestVersion: "2.4.0"
+  manifestVersion: "2.4.1"
   deploymentSize: "Small"
   tmmCpu: "2"
   tmmMemory: "4Gi"
   tmmMtu: 1500
   farArchive: "./keys/f5-far-auth-key.tgz"
   jwt: "./keys/license.jwt"
+  aiGateway:
+    enabled: true
+    aiMetrics: true
 
 egress:
   enabled: true
