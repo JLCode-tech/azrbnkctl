@@ -96,7 +96,7 @@ jobs:
 
       - name: Upload dry-run logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-dryrun-logs
           path: artifacts/
@@ -165,7 +165,7 @@ jobs:
 
       - name: Upload up/down dry-run logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: up-dryrun-logs
           path: artifacts/
