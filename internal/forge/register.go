@@ -130,13 +130,13 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 	if env == "" {
 		env = "dev"
 	}
-	projType := req.ProjectType
-	if projType == "" {
-		projType = "cloud-azure"
-	}
 	cloudProv := req.CloudProvider
 	if cloudProv == "" {
 		cloudProv = "azure"
+	}
+	projType := req.ProjectType
+	if projType == "" {
+		projType = "cloud-" + cloudProv
 	}
 
 	var projectID int
@@ -154,7 +154,7 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		CredentialTemplateID: req.CredentialTemplateID,
 	})
 	if err != nil {
-		// If project already exists (conflict), find and reuse it
+		// If project already exists (conflict), find and reuse it.
 		errLower := strings.ToLower(err.Error())
 		if strings.Contains(errLower, "already exists") || strings.Contains(errLower, "conflict") || strings.Contains(errLower, "409") {
 			if plist, lerr := c.ListProjects(ctx); lerr == nil {
@@ -177,7 +177,7 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		createdProject = true
 	}
 
-	// 2) create cluster
+	// 2) create cluster (or reuse/recreate if already exists in project)
 	cluster, err := c.CreateCluster(ctx, CreateClusterRequest{
 		ProjectID:     projectID,
 		Name:          req.ClusterName,
@@ -185,12 +185,40 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 		Region:        req.Region,
 	}, req.Kubeconfig)
 	if err != nil {
-		// Cluster create failed — try to roll back the project only if we created it.
-		// Re-running shouldn't delete pre-existing shared projects.
-		if createdProject {
-			_ = c.DeleteProject(ctx, projectID, true)
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "already exists") || strings.Contains(errLower, "conflict") || strings.Contains(errLower, "409") {
+			if clist, lerr := c.ListClusters(ctx, projectID); lerr == nil {
+				for _, existing := range clist.Clusters {
+					if strings.EqualFold(existing.Name, req.ClusterName) {
+						// Delete stale cluster entry and recreate so Forge has the latest kubeconfig/CA
+						_ = c.DeleteCluster(ctx, existing.ID)
+						if recreated, rerr := c.CreateCluster(ctx, CreateClusterRequest{
+							ProjectID:     projectID,
+							Name:          req.ClusterName,
+							CloudProvider: cloudProv,
+							Region:        req.Region,
+						}, req.Kubeconfig); rerr == nil {
+							cluster = recreated
+							err = nil
+						} else {
+							cluster.Cluster.ID = existing.ID
+							cluster.Cluster.Name = existing.Name
+							cluster.Cluster.ProjectID = projectID
+							err = nil
+						}
+						break
+					}
+				}
+			}
 		}
-		return RegisterResult{}, fmt.Errorf("create_cluster: %w", err)
+		if err != nil {
+			// Cluster create failed — try to roll back the project only if we created it.
+			// Re-running shouldn't delete pre-existing shared projects.
+			if createdProject {
+				_ = c.DeleteProject(ctx, projectID, true)
+			}
+			return RegisterResult{}, fmt.Errorf("create_cluster: %w", err)
+		}
 	}
 
 	link := &Link{
@@ -251,20 +279,78 @@ func Unregister(ctx context.Context, c *Client, workspaceDir string, purge bool)
 	if err != nil {
 		return err
 	}
+	return UnregisterLink(ctx, c, link, workspaceDir, purge)
+}
 
-	if err := c.DeleteCluster(ctx, link.ClusterID); err != nil {
-		// 404 is fine — the cluster was already gone forge-side.
-		if !is404(err) {
-			return fmt.Errorf("delete_cluster: %w", err)
+// UnregisterLink tears down the forge-side registration using an already-resolved
+// Link (e.g. synthesized from state.env when forge_link.json was lost).
+func UnregisterLink(ctx context.Context, c *Client, link *Link, workspaceDir string, purge bool) error {
+	if link == nil {
+		return os.ErrNotExist
+	}
+	if link.ClusterID > 0 {
+		if err := c.DeleteCluster(ctx, link.ClusterID); err != nil {
+			// 404 is fine — the cluster was already gone forge-side.
+			if !is404(err) {
+				return fmt.Errorf("delete_cluster: %w", err)
+			}
 		}
 	}
-	if purge {
+	if purge && link.ProjectID > 0 {
 		if err := c.DeleteProject(ctx, link.ProjectID, true); err != nil && !is404(err) {
 			return fmt.Errorf("delete_project: %w", err)
 		}
 	}
-	if err := RemoveLink(workspaceDir); err != nil {
-		return fmt.Errorf("remove forge_link.json: %w", err)
+	if workspaceDir != "" {
+		if err := RemoveLink(workspaceDir); err != nil {
+			return fmt.Errorf("remove forge_link.json: %w", err)
+		}
+	}
+	return nil
+}
+
+// UnregisterMCPByName discovers and deletes a Forge project (and its clusters) by cluster name
+// via MCP when no local forge_link.json or FORGE_PROJECT_ID is present.
+// Returns os.ErrNotExist when no matching project exists on the MCP server.
+func UnregisterMCPByName(ctx context.Context, c *Client, clusterName string, purge bool) error {
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		return os.ErrNotExist
+	}
+	plist, err := c.ListProjects(ctx)
+	if err != nil {
+		return err
+	}
+	candidates := []string{
+		clusterName,
+		"awsbnkctl-" + clusterName,
+		"bnkctl-" + clusterName,
+		"azrbnkctl-" + clusterName,
+		"gkebnkctl-" + clusterName,
+	}
+	matchedAny := false
+	for _, p := range plist.Projects {
+		if p.ID <= 0 {
+			continue
+		}
+		matched := false
+		for _, cand := range candidates {
+			if strings.EqualFold(p.Name, cand) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		matchedAny = true
+		_ = purge
+		if dErr := c.DeleteProject(ctx, p.ID, true); dErr != nil && !is404(dErr) {
+			return fmt.Errorf("delete_project: %w", dErr)
+		}
+	}
+	if !matchedAny {
+		return os.ErrNotExist
 	}
 	return nil
 }

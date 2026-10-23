@@ -101,16 +101,30 @@ type ClusterSpec struct {
 	TMMNodePool       NodePoolSpec `yaml:"tmmNodePool,omitempty"`
 }
 
+// BnkAIGatewaySpec configures the BNK 2.4.1+ Multi-Cluster AI Gateway (inference.k8s.f5.com/v1alpha1).
+type BnkAIGatewaySpec struct {
+	Enabled            bool   `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	AIMetrics          bool   `yaml:"aiMetrics,omitempty" json:"aiMetrics,omitempty"`
+	ConsoleURL         string `yaml:"consoleUrl,omitempty" json:"consoleUrl,omitempty"`
+	DefaultEgressRoute bool   `yaml:"defaultEgressRoute,omitempty" json:"defaultEgressRoute,omitempty"`
+	DNSResolver        bool   `yaml:"dnsResolver,omitempty" json:"dnsResolver,omitempty"`
+	DSSMSentinel       bool   `yaml:"dssmSentinel,omitempty" json:"dssmSentinel,omitempty"`
+	MultiNUMASpanning  bool   `yaml:"multiNumaSpanning,omitempty" json:"multiNumaSpanning,omitempty"`
+}
+
 // BnkSpec defines the supply-chain credentials and BNK parameters.
 type BnkSpec struct {
-	FARArchive      string `yaml:"farArchive"`
-	JWT             string `yaml:"jwt"`
-	ManifestVersion string `yaml:"manifestVersion,omitempty"`
-	DeploymentSize  string `yaml:"deploymentSize,omitempty"`
-	TmmCpu          string `yaml:"tmmCpu,omitempty"`
-	TmmMemory       string `yaml:"tmmMemory,omitempty"`
-	TmmMtu          int    `yaml:"tmmMtu,omitempty"`
-	Telemetry       bool   `yaml:"telemetry,omitempty"`
+	FARArchive      string            `yaml:"farArchive"`
+	JWT             string            `yaml:"jwt"`
+	Version         string            `yaml:"version,omitempty"`
+	ManifestVersion string            `yaml:"manifestVersion,omitempty"`
+	FLOVersion      string            `yaml:"floVersion,omitempty"`
+	DeploymentSize  string            `yaml:"deploymentSize,omitempty"`
+	TmmCpu          string            `yaml:"tmmCpu,omitempty"`
+	TmmMemory       string            `yaml:"tmmMemory,omitempty"`
+	TmmMtu          int               `yaml:"tmmMtu,omitempty"`
+	Telemetry       bool              `yaml:"telemetry,omitempty"`
+	AIGateway       *BnkAIGatewaySpec `yaml:"aiGateway,omitempty"`
 }
 
 // UnmarshalYAML accepts both integer (e.g. 1500) and numeric string (e.g. "1500")
@@ -151,6 +165,9 @@ func (b *BnkSpec) UnmarshalYAML(value *yaml.Node) error {
 		}
 		return err
 	}
+	if raw.ManifestVersion == "" && raw.Version != "" {
+		raw.ManifestVersion = raw.Version
+	}
 	*b = BnkSpec(raw)
 	return nil
 }
@@ -163,9 +180,14 @@ func (b BnkSpec) Is24() bool {
 
 // FLOVersion resolves the FLO chart version paired with bnk.manifestVersion.
 func (c *Cluster) FLOVersion() string {
-	if c != nil && c.Bnk.ManifestVersion != "" {
-		if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
-			return chart
+	if c != nil {
+		if c.Bnk.FLOVersion != "" {
+			return c.Bnk.FLOVersion
+		}
+		if c.Bnk.ManifestVersion != "" {
+			if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
+				return chart
+			}
 		}
 	}
 	return manifest.DefaultFLOChart()

@@ -4,6 +4,7 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -21,6 +22,7 @@ type CNEInstanceData struct {
 	ExtPCI             string
 	IntPCI             string
 	Telemetry          bool
+	AIGateway          bool
 	ImageRegistry      string
 	PalCpuSet          string
 	NetworkAttachments []string
@@ -114,9 +116,46 @@ func normalizeDeploymentSize(s string) string {
 	}
 }
 
+func isAIGatewayManifestVersion(manifestVersion string) bool {
+	v := strings.TrimPrefix(strings.TrimSpace(manifestVersion), "v")
+	if v == "" {
+		return false
+	}
+	base := strings.SplitN(v, "-", 2)[0]
+	parts := strings.Split(base, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	maj, err1 := strconv.Atoi(parts[0])
+	min, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if maj > 2 {
+		return true
+	}
+	if maj < 2 {
+		return false
+	}
+	if min > 4 {
+		return true
+	}
+	if min < 4 {
+		return false
+	}
+	if len(parts) < 3 {
+		return false
+	}
+	patch, err3 := strconv.Atoi(parts[2])
+	return err3 == nil && patch >= 1
+}
+
 // RenderCNEInstance renders the CNEInstance custom resource.
 func RenderCNEInstance(data CNEInstanceData) ([]byte, error) {
 	data.DeploymentSize = normalizeDeploymentSize(data.DeploymentSize)
+	if isAIGatewayManifestVersion(data.ManifestVersion) {
+		data.AIGateway = true
+	}
 	return renderTemplate("templates/cneinstance.yaml.tmpl", data)
 }
 

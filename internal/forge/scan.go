@@ -27,11 +27,12 @@ type ScanResult struct {
 		Status string `json:"status"`
 		Health string `json:"health"`
 		CRDs   struct {
-			Total         int      `json:"total"`
-			Groups        []string `json:"groups"`
-			HasDataPlane  bool     `json:"has_data_plane"`
-			HasFLO        bool     `json:"has_flo"`
-			HasGatewayExt bool     `json:"has_gateway_ext"`
+			Total          int      `json:"total"`
+			Groups         []string `json:"groups"`
+			HasDataPlane   bool     `json:"has_data_plane"`
+			HasFLO         bool     `json:"has_flo"`
+			HasGatewayExt  bool     `json:"has_gateway_ext"`
+			HasF5Inference bool     `json:"has_f5_inference"`
 		} `json:"crds"`
 		FLO struct {
 			Version string `json:"version"`
@@ -85,6 +86,20 @@ func (s ScanResult) Generation() bnkscan.Generation {
 func (s ScanResult) Indexes24() bool {
 	for _, g := range s.BNKInstall.CRDs.Groups {
 		if g == "gateway.k8s.f5.com" {
+			return true
+		}
+	}
+	return false
+}
+
+// IndexesF5Inference reports whether forge indexed the BNK 2.4.1
+// inference.k8s.f5.com AI Gateway CRD group.
+func (s ScanResult) IndexesF5Inference() bool {
+	if s.BNKInstall.CRDs.HasF5Inference {
+		return true
+	}
+	for _, g := range s.BNKInstall.CRDs.Groups {
+		if g == bnkscan.InferenceF5Group {
 			return true
 		}
 	}

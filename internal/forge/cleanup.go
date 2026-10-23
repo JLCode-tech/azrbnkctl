@@ -161,24 +161,28 @@ func DeleteClusterBenchmarkArtifacts(ctx context.Context, restURL string, creds 
 
 // DeleteAllClusterBenchmarkArtifacts purges all azrbnkctl-prefixed benchmark records.
 func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, creds RestCreds, clusterID int) error {
-	if err := DeleteClusterBenchmarkArtifacts(ctx, restURL, creds, clusterID); err != nil {
-		return err
-	}
+	targetErr := DeleteClusterBenchmarkArtifacts(ctx, restURL, creds, clusterID)
 
 	base := strings.TrimRight(restURL, "/")
 	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
+		if targetErr != nil {
+			return targetErr
+		}
 		return fmt.Errorf("login: %w", err)
 	}
 
 	var agents []BenchmarkAgentResponse
 	if err := restGet(ctx, base+BenchmarkAgentEndpoint, token, &agents); err == nil {
 		for _, a := range agents {
-			if strings.HasPrefix(a.Name, benchmarkArtifactPrefix) {
+			if strings.HasPrefix(a.Name, benchmarkArtifactPrefix) ||
+				strings.HasPrefix(a.Name, "awsbnkctl-") ||
+				strings.HasPrefix(a.Name, "gkebnkctl-") ||
+				strings.HasPrefix(a.Name, "bnkctl-") {
 				_ = DeleteBenchmarkAgentByName(ctx, restURL, creds, a.Name)
 			}
 		}
 	}
 
-	return nil
+	return targetErr
 }

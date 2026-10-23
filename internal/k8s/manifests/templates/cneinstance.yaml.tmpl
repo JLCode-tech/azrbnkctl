@@ -11,9 +11,14 @@ spec:
   wholeCluster: true
   telemetry:
     loggingSubsystem:
-      enabled: false
+      enabled: {{ if or .Telemetry .AIGateway }}true{{ else }}false{{ end }}
     metricSubsystem:
-      enabled: false
+      enabled: {{ if .Telemetry }}true{{ else }}false{{ end }}
+{{- if .AIGateway }}
+  aiGateway:
+    enabled: true
+    aiMetrics: true
+{{- end }}
   certificate:
     clusterIssuer: ext-ca-cluster-issuer
   deploymentSize: "{{ .DeploymentSize }}"

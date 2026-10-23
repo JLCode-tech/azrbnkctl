@@ -22,8 +22,8 @@ This is where **F5 BIG-IP Next for Kubernetes (BNK)** operates. BNK does not rep
   - Public Subnet: `10.0.16.0/28`
   - External Subnet (BNK VIP): `10.0.17.0/24` (VIP: `10.0.17.100`)
   - Internal Subnet (Core Data Plane): `10.0.18.0/24`
-- **Kubernetes Version**: `1.32.0`
-- **F5 BNK Manifest**: `2.4.0-3.2882.0`
+- **Kubernetes Version**: `1.35`
+- **F5 BNK Manifest**: `2.4.1` (`2.4.1-3.2850.1-0.0.9`, FLO `v2.30.1-0.0.8`)
 
 ```
                                       TRUST BOUNDARY
@@ -31,11 +31,13 @@ This is where **F5 BIG-IP Next for Kubernetes (BNK)** operates. BNK does not rep
 │     Azure AI Foundry Agent      │         │         │               AKS Cluster (australiaeast)               │
 │                                 │         │         │                                                         │
 │  1. Prompt: "Forecast MSFT"     │         │         │  ┌───────────────────────────────────────────────────┐  │
-│  2. Model: Azure OpenAI (gpt-4o)│         │         │  │              F5 BIG-IP Next for K8s (BNK)         │  │
+│  2. Model: Azure OpenAI (gpt-4o)│         │         │  │              F5 BIG-IP Next for K8s (BNK 2.4.1)   │  │
 │  3. Stop: needs tool 'forecast' │         │         │  │                                                   │  │
-│                                 │         │         │  │  • L4 Firewall (F5BigFwPolicy)                    │  │
-│  4. Outbound Tool Call ─────────┼─────────┼─────────┼─►│  • L7 TLS Termination (Gateway / Secret)          │  │
-│     (Authorization: Bearer ...) │         │         │  │  • Rate Limiting (F5BigCneIrule: 10 req/60s)      │  │
+│                                 │         │         │  │  • Multi-Cluster AI Gateway (inference.k8s.f5.com)│  │
+│  4. Outbound Tool Call ─────────┼─────────┼─────────┼─►│  • AIGatewayProfile & AppPolicy (Tokens/Failover) │  │
+│     (Authorization: Bearer ...) │         │         │  │  • L4 Firewall (F5BigFwPolicy)                    │  │
+│                                 │         │         │  │  • L7 TLS Termination (Gateway / Secret)          │  │
+│                                 │         │         │  │  • Rate Limiting (F5BigCneIrule: 10 req/60s)      │  │
 │                                 │         │         │  │  • RBAC Tool Enforcement (F5BigCneIrule)          │  │
 │                                 │         │         │  │  • Telemetry Logging (BNKGOV -> Fluent Bit)       │  │
 │                                 │         │         │  └─────────────────────────┬─────────────────────────┘  │
@@ -55,30 +57,33 @@ This is where **F5 BIG-IP Next for Kubernetes (BNK)** operates. BNK does not rep
 
 | Path | Caller Identity | Security & Governance Mechanisms | Status |
 | :--- | :--- | :--- | :--- |
-| **Trusted Agent Path** | Azure AI Foundry Agent (`agent`) | F5 BNK L7 Policy, Bearer Token Validation, Rate Limiting, Audit Telemetry | Supported |
-| **Double-Checked Path** | Azure AI Gateway + Agent | Azure API Management / Gateway semantic check **plus** F5 BNK L7 Policy | Supported |
+| **Trusted Agent Path** | Azure AI Foundry Agent (`agent`) | F5 BNK 2.4.1 AI Gateway (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`, `AppPolicy`) + L7 MCP Policy, Bearer Token Validation, Rate Limiting | Supported |
+| **Double-Checked Path** | Azure AI Gateway + Agent | Azure API Management / Gateway semantic check **plus** F5 BNK 2.4.1 L7 Policy | Supported |
 | **Stranger Path** | Unmanaged Scripts / Other Clouds (`external` or `anonymous`) | F5 BNK L4 Firewall (`F5BigFwPolicy`) + L7 RBAC blocking sensitive tools | Supported |
 
 ---
 
 ## Demo Walkthrough & Lifecycle
 
-### Step 1: Provision Cluster & BNK Control Plane
+### Step 1: Provision Cluster & BNK 2.4.1 Control Plane
 ```bash
 # Validate configuration
 azrbnkctl validate examples/agentfoundry-demo/cluster.yaml
 
-# Provision infrastructure and F5 BNK in australiaeast
+# Provision infrastructure and F5 BNK 2.4.1 in australiaeast
 azrbnkctl up -f examples/agentfoundry-demo/cluster.yaml
 ```
 
-### Step 2: Deploy FastMCP Tool & Ingress Gateway
+### Step 2: Deploy FastMCP Tool, Ingress Gateway, and BNK 2.4.1 AI Gateway
 ```bash
 KUBECONFIG=.azrbnkctl/bnk-agentfoundry-demo/kubeconfig \
   kubectl apply -k examples/agentfoundry-demo/mcp-tool/
 
 KUBECONFIG=.azrbnkctl/bnk-agentfoundry-demo/kubeconfig \
   kubectl apply -f examples/agentfoundry-demo/gateway-deployment.yaml
+
+KUBECONFIG=.azrbnkctl/bnk-agentfoundry-demo/kubeconfig \
+  ./examples/agentfoundry-demo/scripts/setup-llm-gateway.sh
 ```
 
 ### Step 3: Apply BNK Security Policies & Rate Limiting
@@ -107,8 +112,9 @@ python3 examples/agentfoundry-demo/foundry-agent.py --prompt "Forecast MSFT for 
 # 2. Run stranger agent attempting to access privileged tool
 python3 examples/agentfoundry-demo/external-agent.py --tool get_account_balance --account ACC-1001
 
-# 3. Run continuous in-cluster background generator (already deployed in Step 4) or local runner:
-./examples/agentfoundry-demo/traffic-gen.sh
+# 3. Query Forge Multi-Cluster AI Gateway & Dependency Fabric
+azrbnkctl forge governance overview -f examples/agentfoundry-demo/cluster.yaml
+azrbnkctl forge governance test-request -f examples/agentfoundry-demo/cluster.yaml
 
 # 4. Or execute the full 7-act guided walkthrough
 ./examples/agentfoundry-demo/scripts/demo.sh
@@ -119,5 +125,6 @@ python3 examples/agentfoundry-demo/external-agent.py --tool get_account_balance 
 ## Verification in BNK Forge
 
 When registered with BNK Forge (`http://localhost:8000`):
-1. **Gateway Topology**: Renders Gateway `bnk-agentfoundry-demo-gateway`, listeners on ports 80 & 443, and attached `F5BigCneIrule` and `F5BigFwPolicy`.
-2. **LLM Observability**: Ingests real-time `BNKGOV` streams from Loki (`http://loki.llm-egress:3100`), visualizing caller identities (`agent`, `external`), models (`mcp:finance-tool`, `azure:gpt-4o`), latencies, status codes (`200`, `403`, `429`), and cost breakdowns.
+1. **Multi-Cluster AI Gateway**: Displays the `inference.k8s.f5.com/v1alpha1` chain (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`), `AppPolicy` (`gateway.k8s.f5.com/v1alpha1`), `F5BigDnsCache` (`net-resolver`), and `F5SPKStaticRoute`.
+2. **Gateway Topology**: Renders Gateway `bnk-agentfoundry-demo-gateway`, listeners on ports 80 & 443, and attached `F5BigCneIrule` and `F5BigFwPolicy`.
+3. **LLM Observability**: Ingests real-time `BNKGOV` and `aigateway-241` streams from Loki (`http://loki.llm-egress:3100`), visualizing caller identities (`agent`, `external`), models (`mcp:finance-tool`, `gpt-4o`), latencies, status codes (`200`, `403`, `429`), and cost breakdowns.

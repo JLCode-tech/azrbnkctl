@@ -3,6 +3,7 @@ package jumphost_test
 import (
 	"crypto/ed25519"
 	"encoding/pem"
+	"os"
 	"strings"
 	"testing"
 
@@ -252,4 +253,29 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestPodExecRunner_LiveStdin(t *testing.T) {
+	if os.Getenv("AZRBNKCTL_LIVE_PROBE_TEST") != "1" {
+		t.Skip("skipping live probe pod exec test (set AZRBNKCTL_LIVE_PROBE_TEST=1 to enable)")
+	}
+	if !jumphost.IsProbePodRunning(t.Context()) {
+		t.Skip("no live probe pod running")
+	}
+	err := jumphost.CopyFileViaEICEStdin(t.Context(), jumphost.ProbeOptions{}, []byte("test-key-bytes-12345\n"), "/tmp/diag_key")
+	if err != nil {
+		t.Fatalf("CopyFileViaEICEStdin: %v", err)
+	}
+	_, err = jumphost.RunStagingCommandWithStdin(t.Context(), jumphost.ProbeOptions{}, "umask 077 && tr -d '\\r\\n' > /tmp/diag_pw", strings.NewReader("BnkDemo#2026!BigIP"))
+	if err != nil {
+		t.Fatalf("RunStagingCommandWithStdin: %v", err)
+	}
+	out, err := jumphost.RunStagingCommands(t.Context(), jumphost.ProbeOptions{}, []string{"wc -c /tmp/diag_key /tmp/diag_pw && rm -f /tmp/diag_*"})
+	t.Logf("wc -c:\n%v (err=%v)", out, err)
+	if err != nil {
+		t.Fatalf("wc -c: %v", err)
+	}
+	if !strings.Contains(out[0], "21 /tmp/diag_key") || !strings.Contains(out[0], "18 /tmp/diag_pw") {
+		t.Fatalf("expected 21 and 18 bytes written, got:\n%s", out[0])
+	}
 }

@@ -233,3 +233,36 @@ func TestRenderCNEControllerRBAC(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderCNEInstance_AIGateway241(t *testing.T) {
+	azOut, err := RenderCNEInstance(CNEInstanceData{
+		ManifestVersion: "2.4.1-3.2850.1-0.0.9",
+		DeploymentSize:  "Small",
+		TmmMtu:          1500,
+	})
+	if err != nil {
+		t.Fatalf("RenderCNEInstance 2.4.1: %v", err)
+	}
+	azRendered := string(azOut)
+	for _, want := range []string{
+		"aiGateway:",
+		"enabled: true",
+		"aiMetrics: true",
+		"loggingSubsystem:\n      enabled: true",
+	} {
+		if !strings.Contains(azRendered, want) {
+			t.Errorf("rendered Azure CNEInstance 2.4.1 missing %q:\n%s", want, azRendered)
+		}
+	}
+
+	for _, v := range []string{"2.4.1", "v2.4.1-3.2850.1-0.0.9", "2.4.3", "2.5.0", "3.0.0"} {
+		if !isAIGatewayManifestVersion(v) {
+			t.Errorf("expected isAIGatewayManifestVersion(%q) = true", v)
+		}
+	}
+	for _, v := range []string{"", "2.3.0", "2.4.0", "2.4.0-3.2882.0", "v2.4.0"} {
+		if isAIGatewayManifestVersion(v) {
+			t.Errorf("expected isAIGatewayManifestVersion(%q) = false", v)
+		}
+	}
+}

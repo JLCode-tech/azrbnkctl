@@ -87,7 +87,7 @@ func NewClientsWithDefault(subscriptionID string) (*Clients, error) {
 	if ShouldSkipAuth() {
 		return &Clients{SubscriptionID: subscriptionID}, nil
 	}
-	cred, err := NewCredential()
+	cred, err := NewCredentialForSubscription(subscriptionID)
 	if err != nil {
 		return nil, err
 	}

@@ -186,7 +186,12 @@ func Phase29ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 			}
 		}
 		if unregErr != nil {
-			fmt.Fprintf(os.Stderr, "[down] warning: forge unregister failed (retaining link): %v\n", unregErr)
+			_ = forge.RemoveLink(workspaceDir)
+			if st != nil {
+				st.Delete("FORGE_REGISTERED")
+				_ = st.Save()
+			}
+			fmt.Fprintf(os.Stderr, "[down] warning: forge unregister failed (removed stale local link; run 'azrbnkctl forge unregister --purge' when Forge is reachable): %v\n", unregErr)
 			return nil
 		}
 		if st != nil {
@@ -201,7 +206,6 @@ func Phase29ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 	if unregErr := forge.UnregisterRESTByName(ctx, restURL, cl.Metadata.Name, creds); unregErr != nil {
 		if !errors.Is(unregErr, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "[down] forge unregister by name: %v\n", unregErr)
-			return nil
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "[down] ✓ cluster %s purged from forge by name\n", cl.Metadata.Name)
