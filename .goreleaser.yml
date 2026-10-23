@@ -56,7 +56,8 @@ release:
   header: |
     ## azrbnkctl {{ .Tag }}
 
-    Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on Azure AKS.
+    Azure AKS cloud-pinned CLI for deploying, operating, and benchmarking **F5 BIG-IP Next for Kubernetes (BNK)** and **F5 BNK AI Service Plane**.
+    *(Tip: Use the unified multi-cloud [**`bnkctl`**](https://github.com/JLCode-tech/bnkctl) CLI as the preferred entry point across AWS, Azure, and GCP.)*
   footer: |
     ---
     See [`CHANGELOG.md`](https://github.com/JLCode-tech/azrbnkctl/blob/main/CHANGELOG.md) for the full per-version change log.

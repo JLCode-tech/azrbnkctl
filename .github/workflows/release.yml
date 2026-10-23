@@ -13,20 +13,23 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to re-run GoReleaser for (e.g. v0.1.0)'
-        required: true
+        description: "Existing release tag to (re)build and upload assets for, e.g. v2.4.1"
+        required: false
         type: string
 
 permissions:
   contents: write
   pull-requests: write
+  packages: write
 
 jobs:
   release-please:
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -35,28 +38,77 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
+          target-branch: main
           release-type: go
 
   goreleaser:
+    name: GoReleaser
     needs: release-please
-    if: ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
+          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag || github.ref }}
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: goreleaser/goreleaser-action@v6
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
           args: release --clean --parallelism 2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-package:
+    name: Publish GHCR Package
+    needs: release-please
+    if: ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Publish GHCR Container Package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REL_TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag || github.ref_name }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          mkdir -p /tmp/ghcr-pkg
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X github.com/JLCode-tech/azrbnkctl/internal/cli.Version=${REL_TAG#v}" -o /tmp/ghcr-pkg/azrbnkctl ./cmd/azrbnkctl
+          cat <<'EOF' > /tmp/ghcr-pkg/Dockerfile
+          FROM alpine:3.20
+          RUN apk add --no-cache ca-certificates bash curl git openssh-client jq
+          COPY azrbnkctl /usr/local/bin/
+          ENTRYPOINT ["azrbnkctl"]
+          EOF
+          IMAGE="ghcr.io/jlcode-tech/azrbnkctl"
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/JLCode-tech/azrbnkctl" \
+            --label "org.opencontainers.image.description=Azure AKS cloud-pinned F5 BIG-IP Next for Kubernetes (BNK) & F5 BNK AI Service Plane CLI (part of the unified bnkctl family)" \
+            --label "org.opencontainers.image.licenses=MIT" \
+            --label "org.opencontainers.image.version=${REL_TAG}" \
+            -t "${IMAGE}:${REL_TAG}" \
+            -t "${IMAGE}:latest" \
+            /tmp/ghcr-pkg
+          docker push "${IMAGE}:${REL_TAG}"
+          docker push "${IMAGE}:latest"
