@@ -57,7 +57,7 @@
 | 9 | **23** | `kubeconfig` | Fetch AKS cluster admin credentials and write to `.azrbnkctl/<name>/kubeconfig`. |
 | 10 | **24** | `node-labels` | Apply and verify TMM node labels (`app=f5-tmm`) and Multus / SR-IOV daemonsets. |
 | 11 | **25** | `discovery` | Discover external/internal SR-IOV PCI addresses (`TMM_EXT_PCI`, `TMM_INT_PCI`) and compute subnet Self-IPs and gateways. |
-| 12 | **29** | `forge-register` | Optionally register the AKS cluster with BNK Forge (`forge.enabled: true`) and deploy `bnk-forge-agent` in `f5-utils`. |
+| 12 | **29** | `forge-register` | Optionally register the AKS cluster with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) (`forge.enabled: true`) and deploy `bnk-forge-agent` in `f5-utils`. |
 | 13 | **30** | `namespaces` | Create `cert-manager`, `f5-cne-core`, `f5-cne-system`, `f5-bnk-instance`, `f5-utils`, `egress-demo` namespaces, distribute `far-secret`, and configure `coredns-custom`. |
 | 14 | **31** | `cert-manager` | Apply cert-manager v1.16.1 CRDs and controllers via dynamic Server-Side Apply. |
 | 15 | **31b** | `metrics-server` | Ensure `metrics.k8s.io/v1beta1` API is served for `kubectl top` and BNK Forge fleet metrics. |

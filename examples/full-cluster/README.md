@@ -33,7 +33,7 @@ This directory provides the production-grade reference architecture for running 
 ## Deployment Steps
 
 ### 1. Configure Credentials
-Place your F5 FAR auth key and subscription JWT into `keys/`:
+Follow the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) to obtain your F5 Artifact Registry (`repo.f5.com`) credentials and subscription JWT (`license.jwt`), and place them into `keys/`:
 ```bash
 mkdir -p examples/full-cluster/keys
 cp /path/to/f5-far-auth-key.tgz examples/full-cluster/keys/

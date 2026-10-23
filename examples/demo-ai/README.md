@@ -1,4 +1,4 @@
-# demo-ai — High-Performance AI Gateway & Inference Benchmarking
+# demo-ai — F5 BNK AI Service Plane & Inference Benchmarking
 
 | Attribute | Specification |
 |---|---|
@@ -9,11 +9,11 @@
 | **Model Serving** | Synthetic vLLM simulator (`llm-d-inference-sim`) or AKS GPU node |
 | **Estimated Cost** | ~$3.50 - $6.00 / hour |
 
-This blueprint provisions an AKS cluster optimized for evaluating F5 BNK as an **AI Gateway**. It exercises:
+This blueprint provisions an AKS cluster optimized for evaluating the **F5 BNK AI Service Plane** (see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)). It exercises:
 1. **Streaming Token Throughput & Latency**: Measures Time-to-First-Token (TTFT) and Inter-Token Latency (ITL).
 2. **Token Quota Counting & Rate Limiting**: Token-bucket throttling per consumer/tenant.
 3. **Semantic Prompt Caching**: Reducing LLM invocation costs and TTFT for semantically similar queries.
-4. **Multi-Proxy Shootout**: Direct head-to-head comparison between F5 BNK, HAProxy, and Envoy AI Gateway.
+4. **Multi-Proxy Shootout**: Direct head-to-head comparison between F5 BNK, HAProxy, and Envoy.
 
 ---
 
