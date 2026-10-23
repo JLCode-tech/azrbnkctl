@@ -62,7 +62,7 @@ lint:
 	$(MAKE) staticcheck
 
 ci-local:
-	./hack/ci-local.sh
+	./scripts/ci-local.sh
 
 pre-commit-install:
 	ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit && echo "Pre-commit hook installed."

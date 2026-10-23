@@ -208,11 +208,11 @@ jobs:
       - name: cspell (docs/**/*.md + README + CONTRIBUTING)
         uses: streetsidesoftware/cspell-action@v6
         with:
-          config: cspell.json
+          config: .github/cspell.json
           files: |
             docs/**/*.md
             README.md
-            CONTRIBUTING.md
+            .github/CONTRIBUTING.md
 
   security-audit:
     name: security audit (gosec + govulncheck + gitleaks)
@@ -247,4 +247,4 @@ jobs:
           echo "6298c9235dfc9278c14b28afd9b7fa4e6f4a289cb1974bd27949fc1e9122bdee  /tmp/gitleaks.tar.gz" \
             | sha256sum -c -
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --no-banner --redact -v
+          /tmp/gitleaks detect --source . --gitleaks-ignore-path .github/.gitleaksignore --no-banner --redact -v

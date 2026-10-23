@@ -80,3 +80,7 @@ docs/REMEDIATION.md
 /tmp/
 *.orig
 patch.diff
+
+# Root AI assistant scratch files
+/AGENTS.md
+/CLAUDE.md

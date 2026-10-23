@@ -830,5 +830,6 @@
     "bin/**",
     ".azrbnkctl/**",
     "keys/**"
-  ]
+  ],
+  "globRoot": ".."
 }

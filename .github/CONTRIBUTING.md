@@ -23,7 +23,7 @@ go test -race ./...
 # Run full 11-gate local CI suite (mirrors .github/workflows/ci.yml)
 make ci-local
 # or directly:
-./hack/ci-local.sh
+./scripts/ci-local.sh
 ```
 
 ### Offline & Dry-Run Verification (Zero Cloud Credentials)

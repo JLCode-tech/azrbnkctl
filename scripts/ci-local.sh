@@ -48,11 +48,11 @@ else
 	echo "  (goreleaser not on PATH; skipping)"
 fi
 
-echo "== [9/11] cspell (docs/**/*.md + README.md + CONTRIBUTING.md) =="
+echo "== [9/11] cspell (docs/**/*.md + README.md + .github/CONTRIBUTING.md) =="
 if command -v cspell >/dev/null 2>&1; then
-	cspell --config cspell.json "docs/**/*.md" README.md CONTRIBUTING.md
+	cspell --config .github/cspell.json "docs/**/*.md" README.md .github/CONTRIBUTING.md
 elif command -v npx >/dev/null 2>&1; then
-	npx --yes cspell --config cspell.json "docs/**/*.md" README.md CONTRIBUTING.md
+	npx --yes cspell --config .github/cspell.json "docs/**/*.md" README.md .github/CONTRIBUTING.md
 else
 	echo "  (cspell/npx not on PATH; skipping)"
 fi
@@ -73,7 +73,7 @@ else
 	echo "  (govulncheck not installed; skipping)"
 fi
 if command -v gitleaks >/dev/null 2>&1; then
-	gitleaks detect --source . --no-banner --redact -v
+	gitleaks detect --source . --gitleaks-ignore-path .github/.gitleaksignore --no-banner --redact -v
 else
 	echo "  (gitleaks not installed; skipping)"
 fi
