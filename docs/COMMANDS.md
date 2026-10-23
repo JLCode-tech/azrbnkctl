@@ -51,7 +51,7 @@ By default, `azrbnkctl down -f <cluster.yaml>` preserves the Azure Resource Grou
 | `bnk mcp-session` | Render or `--apply` an `F5BigPersistenceProfile` (`MODEL_CONTEXT_PROTOCOL` or `AGENT2AGENT`), its passphrase `Secret`, and the `NetPolicy` per listener that pins MCP sessions to one backend (`--name`, `--type`, `--gateway`, `--listener`, `--irule`, `--passphrase-env`, `--secret`, `--net-policy-name`, `--apply`, `--wait`) |
 | `manifest probe [version]` | Inspect a BNK release manifest (Bill of Materials) from `repo.f5.com` or a local FAR archive without a cluster (`--far <path>`, `--all`) |
 
-## AI benchmarking and BNK Forge
+## AI benchmarking and [BNK Forge](https://github.com/JLCode-tech/bnk-forge)
 
 | Command | Description |
 |---|---|
@@ -61,15 +61,16 @@ By default, `azrbnkctl down -f <cluster.yaml>` preserves the Azure Resource Grou
 | `benchmark list` | List native Forge scenarios and built-in smoke presets (`-o json`) |
 | `benchmark status` | Check the benchmark environment, Azure jumphost readiness, `aiperf` version, and Forge linkage (`-f/--config`, `-w/--workspace`) |
 | `benchmark daemon` | Run the persistent Forge benchmark agent daemon over WebSocket with agent-bound token authentication (`--forge-agent-token`, `--heartbeat-interval`) |
-| `forge register` | Register the AKS cluster with BNK Forge via MCP (preferred) or REST (`-f/--file`, `--cluster-name`, `--kubeconfig`, `--project-name`, `--template-id`, `--scan`, `--rest`) |
+| `forge register` | Register the AKS cluster with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) via MCP (preferred) or REST (`-f/--file`, `--cluster-name`, `--kubeconfig`, `--project-name`, `--template-id`, `--scan`, `--rest`) |
 | `forge status` | Show the cluster's Forge registration state (`-f/--file`, `--json`) |
 | `forge unregister` | Remove the cluster's Forge registration (`--purge` also deletes the project shell) |
 | `forge cleanup` | Delete benchmark artifacts associated with a cluster in Forge (`--workspace`, `--dry-run`) |
-| `forge template {list,create}` | List or create Azure Cloud Credential Templates in BNK Forge (`--name`, `--subscription-id`, `--tenant-id`, `--credentials`, `--default`, `--json`) |
-| `forge scan` | Index the cluster's BNK 2.4 resources, check readiness (`Infra`, `Gateway`, controller), and discover MCP endpoints (`--probe`, `--bearer-env`, `--register-targets`, `--remote`, `-o json`) |
+| `forge template {list,create}` | List or create Azure Cloud Credential Templates in [BNK Forge](https://github.com/JLCode-tech/bnk-forge) (`--name`, `--subscription-id`, `--tenant-id`, `--credentials`, `--default`, `--json`) |
+| `forge scan` | Index the cluster's BNK 2.4 / 2.4.1 resources, check readiness, and discover MCP endpoints (`--probe`, `--bearer-env`, `--register-targets`, `--remote`, `-o json`) |
+| `forge governance {overview,bootstrap,test-request,remediate}` | Manage **F5 BNK AI Service Plane** readiness, DSSM token governance (`f5vk_...`), and live completion probes in [BNK Forge](https://github.com/JLCode-tech/bnk-forge) (`-f/--file`, `--forge-url`, `-o json`) |
 | `forge telemetry` | Validate the MCP governance records in Loki against Forge's LLM Observability schema (`--loki-url`, `--query`, `--since`, `--limit`, `--file`, `--show`, `-o json`) |
 | `forge benchmark` | Alias for `benchmark run` |
-| `bnkforge {register,status,unregister}` | Backward-compatibility alias for BNK Forge topology daemon registration (`--url`, `-f/--file`, `--json`) |
+| `bnkforge {register,status,unregister}` | Backward-compatibility alias for [BNK Forge](https://github.com/JLCode-tech/bnk-forge) topology daemon registration (`--url`, `-f/--file`, `--json`) |
 
 Every `forge` command accepts `-f/--file <cluster.yaml>`, `--mcp-url`, `--rest-url`, `--username`, and `--password`. See [`BENCHMARKS.md`](BENCHMARKS.md) for benchmark presets and proxy shootouts, and [`FORGE_INTEGRATION.md`](FORGE_INTEGRATION.md) for Forge integration details.
 

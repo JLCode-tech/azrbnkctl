@@ -1,16 +1,16 @@
-# BNK Forge Integration
+# BNK Forge & F5 BNK AI Service Plane Integration
 
-`azrbnkctl` features built-in integration with **F5 BNK Forge** (`azrbnkctl forge`, with `azrbnkctl bnkforge` retained as a backward-compatibility alias) for real-time topology visualization, fleet telemetry, template catalog management, security/readiness scanning, and AI benchmark ingestion.
+`azrbnkctl` features built-in integration with [**F5 BNK Forge**](https://github.com/JLCode-tech/bnk-forge) (`azrbnkctl forge`, with `azrbnkctl bnkforge` retained as a backward-compatibility alias) for real-time topology visualization, **F5 BNK AI Service Plane** governance, fleet telemetry, template catalog management, security/readiness scanning, and AI benchmark ingestion. For complete documentation on F5 BIG-IP Next for Kubernetes traffic and AI capabilities, see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 ## 1. Overview & Transport Architecture
 
 `azrbnkctl forge` uses a **dual-transport client** (`internal/forge` and `internal/bnkforge`):
-- **MCP-First (`/mcp/`)**: Connects to BNK Forge's Streamable HTTP MCP endpoint (default `http://localhost:8081/mcp/`) to discover projects, register clusters, manage templates, and query live cluster state.
-- **REST Fallback (`/api/...`)**: Automatically falls back to the Forge REST API (default `http://localhost:8000`) for agent token generation, telemetry streaming (`/api/telemetry`), and `aiperf` benchmark result ingestion (`/api/benchmarks/results`).
+- **MCP-First (`/mcp/`)**: Connects to [BNK Forge](https://github.com/JLCode-tech/bnk-forge)'s Streamable HTTP MCP endpoint (default `http://localhost:8081/mcp/`) to discover projects, register clusters, manage templates, and query live cluster state.
+- **REST Fallback (`/api/...`)**: Automatically falls back to the Forge REST API (default `http://localhost:8000`) for agent token generation, telemetry streaming (`/api/telemetry`), **F5 BNK AI Service Plane** governance management, and `aiperf` benchmark result ingestion (`/api/benchmarks/results`).
 
 ## 2. Declarative `cluster.yaml` Configuration
 
-Enable automatic Forge registration during `azrbnkctl up` (Phase 29) and automatic unregistration during `azrbnkctl down` by adding a `forge:` block to `cluster.yaml`:
+Enable automatic [BNK Forge](https://github.com/JLCode-tech/bnk-forge) registration during `azrbnkctl up` (Phase 29) and automatic unregistration during `azrbnkctl down` by adding a `forge:` block to `cluster.yaml`:
 
 ```yaml
 forge:
@@ -24,19 +24,20 @@ forge:
 
 | Subcommand | Description |
 | :--- | :--- |
-| `azrbnkctl forge register -f cluster.yaml` | Register the AKS cluster with BNK Forge, deploy `bnk-forge-agent` in `f5-utils`, and write `.azrbnkctl/<cluster>/forge_link.json` |
+| `azrbnkctl forge register -f cluster.yaml` | Register the AKS cluster with [BNK Forge](https://github.com/JLCode-tech/bnk-forge), deploy `bnk-forge-agent` in `f5-utils`, and write `.azrbnkctl/<cluster>/forge_link.json` |
 | `azrbnkctl forge status -f cluster.yaml` | Show registration state, project/cluster IDs, and live MCP reachability |
-| `azrbnkctl forge unregister -f cluster.yaml` | Unregister the cluster from BNK Forge and remove local link metadata |
-| `azrbnkctl forge cleanup` | Prune stale or orphaned `azrbnkctl-*` projects and clusters in BNK Forge |
+| `azrbnkctl forge unregister -f cluster.yaml` | Unregister the cluster from [BNK Forge](https://github.com/JLCode-tech/bnk-forge) and remove local link metadata |
+| `azrbnkctl forge cleanup` | Prune stale or orphaned `azrbnkctl-*` projects and clusters in [BNK Forge](https://github.com/JLCode-tech/bnk-forge) |
 | `azrbnkctl forge template list` | List available BNK configuration templates in Forge |
 | `azrbnkctl forge template create` | Publish a new BNK template to the Forge catalog |
-| `azrbnkctl forge scan -f cluster.yaml` | Run BNK 2.4 readiness, CRD, and dataplane health scan and report findings |
+| `azrbnkctl forge scan -f cluster.yaml` | Run BNK 2.4 / 2.4.1 readiness and dataplane health scan and report findings |
+| `azrbnkctl forge governance {overview,bootstrap,test-request,remediate}` | Inspect, bootstrap (`f5vk_...`), probe, and remediate the **F5 BNK AI Service Plane** via [BNK Forge](https://github.com/JLCode-tech/bnk-forge) |
 | `azrbnkctl forge telemetry -f cluster.yaml` | Collect and stream live TMM governance, dataplane, and pod metrics to Forge |
 | `azrbnkctl forge benchmark -f cluster.yaml` | Run `aiperf` from the Azure jumphost VM against the BNK VIP and push results to Forge |
 
 ## 4. Cluster Registration & Status
 
-Registering an AKS cluster to Forge is performed automatically during `azrbnkctl up` (when `forge.enabled: true`) or standalone via:
+Registering an AKS cluster to [BNK Forge](https://github.com/JLCode-tech/bnk-forge) is performed automatically during `azrbnkctl up` (when `forge.enabled: true`) or standalone via:
 
 ```bash
 azrbnkctl forge register -f cluster.yaml
@@ -65,7 +66,7 @@ BNK-Forge Status for workspace "bnk-agentfoundry-demo":
 
 ## 5. Telemetry & Benchmarks
 
-Stream governance and TMM dataplane telemetry to BNK Forge:
+Stream governance and TMM dataplane telemetry to [BNK Forge](https://github.com/JLCode-tech/bnk-forge):
 ```bash
 azrbnkctl forge telemetry -f examples/agentfoundry-demo/cluster.yaml \
   --forge-url http://localhost:8000 \

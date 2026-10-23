@@ -344,11 +344,11 @@ flowchart LR
 
 ---
 
-## 4. AI Gateway Scenarios
+## 4. F5 BNK AI Service Plane Scenarios
 
 ### `ai-token-counting` (VIP `.104`)
-- **Objective**: Validates AI Gateway LLM token measurement, token bucket quota enforcement, and rate-limiting.
-- **Traffic Path**: Client HTTP POST with completions payload $\to$ TMM AI Gateway (`10.0.17.104`) $\to$ Model endpoint.
+- **Objective**: Validates **F5 BNK AI Service Plane** LLM token measurement, token bucket quota enforcement, and rate-limiting.
+- **Traffic Path**: Client HTTP POST with completions payload $\to$ TMM F5 BNK AI Service Plane (`10.0.17.104`) $\to$ Model endpoint.
 - **Assertions**: Control plane Ready, Gateway Programmed, HTTPRoute Accepted, `k8s.f5.com/ai-token-counting` annotation active. Returns HTTP 503 on quota overload.
 - **Rating**: **Amber** (control plane verified; data path requires live or simulated LLM backend).
 
@@ -384,7 +384,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant Client as Client / Jumphost
-    participant TMM as TMM AI Gateway (.109)
+    participant TMM as TMM F5 BNK AI Service Plane (.109)
     participant Cache as Semantic Vector Cache
     participant LLM as vLLM / OpenAI Backend
 
@@ -416,7 +416,7 @@ sequenceDiagram
 flowchart LR
     Client([Jumphost Test Client<br/>aiperf Engine])
 
-    subgraph Gateway["F5 BNK AI Gateway (VIP: 10.0.17.112:80)"]
+    subgraph Gateway["F5 BNK AI Service Plane (VIP: 10.0.17.112:80)"]
         direction TB
         VIP["Gateway VIP: 10.0.17.112:80<br/>Host: azrbnkctl-aiinference.local"]
         TMM["TMM Microkernel<br/>HTTPRoute: scn-aiinference-route"]
