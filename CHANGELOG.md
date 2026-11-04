@@ -5,6 +5,14 @@ All notable changes to `azrbnkctl` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.2](https://github.com/JLCode-tech/azrbnkctl/compare/v2.4.1...v2.4.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **azure:** sync BNK 2.4.1 overlay, CoreDNS, teardown, and AgentFoundry demo fixes ([#47](https://github.com/JLCode-tech/azrbnkctl/issues/47)) ([9861d55](https://github.com/JLCode-tech/azrbnkctl/commit/9861d55389f9415862d2a24e608e1560d1843308))
+* **ci:** fix gitleaks allowlist section header in .gitleaks.toml ([2d7733f](https://github.com/JLCode-tech/azrbnkctl/commit/2d7733fc0053d5038aff5a0a159ebc09b49076b4))
+
 ## [1.1.0](https://github.com/JLCode-tech/azrbnkctl/compare/v1.0.0...v1.1.0) (2026-10-07)
 
 
