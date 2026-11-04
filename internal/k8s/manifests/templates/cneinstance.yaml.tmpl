@@ -18,6 +18,11 @@ spec:
   aiGateway:
     enabled: true
     aiMetrics: true
+    consoleURL: "http://f5-ai-console-webui.aigateway:8080/v1/services/default"
+    eppNamespaces:
+      - default
+      - f5-cne-system
+      - aigateway
 {{- end }}
   certificate:
     clusterIssuer: ext-ca-cluster-issuer

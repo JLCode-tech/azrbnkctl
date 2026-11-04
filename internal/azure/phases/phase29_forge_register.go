@@ -53,6 +53,13 @@ func Phase29ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		return nil
 	}
 
+	if cl.Forge.ProjectType == "" {
+		cl.Forge.ProjectType = "cloud-azure"
+	}
+	if cl.Forge.CloudProvider == "" {
+		cl.Forge.CloudProvider = "azure"
+	}
+
 	req := forge.RegisterRequest{
 		ForgeRESTURL:         restURL,
 		WorkspaceName:        cl.Metadata.Name,

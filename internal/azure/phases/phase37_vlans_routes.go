@@ -92,6 +92,9 @@ func Phase37VlansRoutes(ctx context.Context, cl *intent.Cluster, st *state.State
 	if err := k8s.WaitForCRDEstablished(ctx, dyn, crdName, 5*time.Minute); err != nil {
 		return fmt.Errorf("phase37: waiting for %s CRD: %w", crdName, err)
 	}
+	if !isLegacy23 {
+		_ = k8s.WaitForCRDEstablished(ctx, dyn, "f5-big-dns-caches.k8s.f5net.com", 2*time.Minute)
+	}
 	fmt.Fprintf(os.Stderr, "[phase 37] %s CRD established\n", crdName)
 
 	applier, err := k8s.NewApplier(cfg)

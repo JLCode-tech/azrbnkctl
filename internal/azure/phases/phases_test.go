@@ -24,6 +24,9 @@ func TestIsAzureNotFound(t *testing.T) {
 	if !isAzureNotFound(notFoundErr) {
 		t.Errorf("expected 404 ResourceNotFound to be classified as not found")
 	}
+	if isAzureScopeLocked(notFoundErr) {
+		t.Errorf("expected 404 ResourceNotFound to NOT be classified as scope locked")
+	}
 
 	scopeLockedErr := &azcore.ResponseError{
 		StatusCode: http.StatusConflict,
@@ -31,6 +34,9 @@ func TestIsAzureNotFound(t *testing.T) {
 	}
 	if isAzureNotFound(scopeLockedErr) {
 		t.Errorf("expected 409 ScopeLocked to NOT be classified as not found")
+	}
+	if !isAzureScopeLocked(scopeLockedErr) {
+		t.Errorf("expected 409 ScopeLocked to be classified as scope locked")
 	}
 }
 

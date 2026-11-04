@@ -38,7 +38,9 @@ forge_link.json
 
 # --- BNK supply-chain & cloud credentials (never commit) ---
 # Operator-supplied per cluster.yaml; grant FAR pull + license rights.
-keys/
+**/keys
+**/keys/
+.foundry-network-env.json
 *.jwt
 *.token
 *.far

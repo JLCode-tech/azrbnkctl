@@ -7,11 +7,16 @@ spec:
   config: |
     {
       "cniVersion": "0.3.1",
-      "name": "tmm-ext",
-      "type": "dummy",
+      "name": "external-net",
+      "type": "bridge",
+      "bridge": "br-ext",
+      "isGateway": true,
+      "ipMasq": false,
       "ipam": {
         "type": "host-local",
-        "subnet": "10.0.17.0/24"
+        "subnet": "10.0.17.0/24",
+        "rangeStart": "10.0.17.200",
+        "rangeEnd": "10.0.17.250"
       }
     }
 {{- if .IntPCI }}
@@ -25,11 +30,17 @@ spec:
   config: |
     {
       "cniVersion": "0.3.1",
-      "name": "tmm-int",
-      "type": "dummy",
+      "name": "internal-net",
+      "type": "bridge",
+      "bridge": "br-int",
+      "isGateway": true,
+      "ipMasq": false,
       "ipam": {
         "type": "host-local",
-        "subnet": "10.0.18.0/24"
+        "subnet": "10.0.18.0/24",
+        "rangeStart": "10.0.18.200",
+        "rangeEnd": "10.0.18.250"
       }
     }
 {{- end }}
+
