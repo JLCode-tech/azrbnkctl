@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +21,50 @@ import (
 	"github.com/JLCode-tech/azrbnkctl/internal/intent"
 	"github.com/JLCode-tech/azrbnkctl/internal/k8s"
 )
+
+var (
+	reBlockedRG   = regexp.MustCompile(`Deletion of resource group '([^']+)' failed`)
+	reBlockedVMSS = regexp.MustCompile(`Microsoft\.Compute/virtualMachineScaleSets/([a-zA-Z0-9._-]+)`)
+)
+
+func isRetryableAKSDeleteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ResourceGroupDeletionBlocked") ||
+		strings.Contains(msg, "Rolling Upgrade") ||
+		strings.Contains(msg, "rolling upgrade")
+}
+
+func isClusterDeletionAlreadyInitiated(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "deletion has been initiated on the cluster")
+}
+
+func cancelBlockingVMSSRollingUpgrades(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	msg := err.Error()
+	rgMatch := reBlockedRG.FindStringSubmatch(msg)
+	if len(rgMatch) < 2 {
+		return
+	}
+	nodeRG := rgMatch[1]
+	matches := reBlockedVMSS.FindAllStringSubmatch(msg, -1)
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		vmss := m[1]
+		// #nosec G204 -- controlled Azure CLI VMSS name from Azure SDK error response
+		_ = exec.CommandContext(ctx, "az", "vmss", "rolling-upgrade", "cancel", "-g", nodeRG, "-n", vmss).Run()
+	}
+}
 
 func isAzureNotFound(err error) bool {
 	if err == nil {
@@ -39,6 +85,38 @@ func isAzureNotFound(err error) bool {
 		strings.Contains(msg, "resourcegroupnotfound") ||
 		strings.Contains(msg, "status code: 404") ||
 		strings.Contains(msg, "http 404")
+}
+
+func isAzureScopeLocked(err error) bool {
+	if err == nil {
+		return false
+	}
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) {
+		if respErr.ErrorCode == "ScopeLocked" {
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "scopelocked") ||
+		strings.Contains(msg, "cannot perform delete operation because following scope(s) are locked")
+}
+
+func deallocateLockedCompute(ctx context.Context, rg, clusterName, baseName string) {
+	if rg == "" {
+		return
+	}
+	if baseName != "" {
+		vmName := fmt.Sprintf("%s-bigip-ve", baseName)
+		fmt.Fprintf(os.Stderr, "[down] ScopeLocked fallback: deallocating companion BIG-IP VE %s in %s\n", vmName, rg)
+		// #nosec G204 -- controlled Azure CLI VM name from cluster config
+		_ = exec.CommandContext(ctx, "az", "vm", "deallocate", "-g", rg, "-n", vmName, "--no-wait").Run()
+	}
+	if clusterName != "" {
+		fmt.Fprintf(os.Stderr, "[down] ScopeLocked fallback: stopping AKS cluster %s in %s\n", clusterName, rg)
+		// #nosec G204 -- controlled Azure CLI cluster name from cluster config
+		_ = exec.CommandContext(ctx, "az", "aks", "stop", "-g", rg, "-n", clusterName, "--no-wait").Run()
+	}
 }
 
 func resolveAzureDownTarget(cl *intent.Cluster, st *state.State) (rg, aksClusterName, baseName string) {
@@ -161,17 +239,30 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	}
 
 	rgCandidates := resolveAzureDownRGCandidates(cl, st)
+	lockedRGs := make(map[string]bool)
 
 	if clients.AgentPools != nil {
 		for _, rg := range rgCandidates {
 			for _, cand := range clusterCandidates {
 				poller, err := clients.AgentPools.BeginDelete(ctx, rg, cand, tmmPoolName, nil)
 				if err != nil {
-					if !isAzureNotFound(err) {
+					if isAzureScopeLocked(err) {
+						fmt.Fprintf(os.Stderr, "[down] warning: Resource Group %s has a CanNotDelete lock (ScopeLocked); deallocating/stopping compute instead of deleting\n", rg)
+						deallocateLockedCompute(ctx, rg, cand, baseName)
+						lockedRGs[rg] = true
+						break
+					}
+					if !isAzureNotFound(err) && !isClusterDeletionAlreadyInitiated(err) {
 						return fmt.Errorf("delete TMM nodepool %s in %s/%s: %w", tmmPoolName, rg, cand, err)
 					}
 				} else if poller != nil {
-					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) && !isClusterDeletionAlreadyInitiated(err) {
+						if isAzureScopeLocked(err) {
+							fmt.Fprintf(os.Stderr, "[down] warning: Resource Group %s has a CanNotDelete lock (ScopeLocked); deallocating/stopping compute instead of deleting\n", rg)
+							deallocateLockedCompute(ctx, rg, cand, baseName)
+							lockedRGs[rg] = true
+							break
+						}
 						return fmt.Errorf("waiting for TMM nodepool %s delete: %w", tmmPoolName, err)
 					}
 				}
@@ -181,23 +272,72 @@ func PhaseDownCluster(ctx context.Context, cl *intent.Cluster, st *state.State, 
 
 	if clients.ManagedClusters != nil {
 		for _, rg := range rgCandidates {
+			if lockedRGs[rg] {
+				continue
+			}
 			for _, cand := range clusterCandidates {
-				poller, err := clients.ManagedClusters.BeginDelete(ctx, rg, cand, nil)
-				if err != nil {
-					if !isAzureNotFound(err) {
-						return fmt.Errorf("delete AKS cluster %s in %s: %w", cand, rg, err)
+				var lastErr error
+				for attempt := 0; attempt < 3; attempt++ {
+					lastErr = nil
+					poller, err := clients.ManagedClusters.BeginDelete(ctx, rg, cand, nil)
+					if err != nil {
+						if isAzureNotFound(err) {
+							break
+						}
+						if isAzureScopeLocked(err) {
+							fmt.Fprintf(os.Stderr, "[down] warning: Resource Group %s has a CanNotDelete lock (ScopeLocked); deallocating/stopping compute instead of deleting\n", rg)
+							deallocateLockedCompute(ctx, rg, cand, baseName)
+							break
+						}
+						lastErr = fmt.Errorf("delete AKS cluster %s in %s: %w", cand, rg, err)
+					} else if poller != nil {
+						if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+							if isAzureScopeLocked(err) {
+								fmt.Fprintf(os.Stderr, "[down] warning: Resource Group %s has a CanNotDelete lock (ScopeLocked); deallocating/stopping compute instead of deleting\n", rg)
+								deallocateLockedCompute(ctx, rg, cand, baseName)
+								break
+							}
+							lastErr = fmt.Errorf("waiting for AKS cluster %s delete: %w", cand, err)
+						}
 					}
-				} else if poller != nil {
-					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
-						return fmt.Errorf("waiting for AKS cluster %s delete: %w", cand, err)
+					if lastErr == nil || !isRetryableAKSDeleteError(lastErr) {
+						break
 					}
+					cancelBlockingVMSSRollingUpgrades(ctx, lastErr)
 				}
+				if lastErr != nil {
+					return lastErr
+				}
+			}
+			if !lockedRGs[rg] {
+				cleanupCompanionBigIPVE(ctx, rg, baseName)
 			}
 		}
 	}
 
 	fmt.Fprintf(os.Stderr, "[down] AKS cluster %s deleted\n", clusterName)
 	return nil
+}
+
+func cleanupCompanionBigIPVE(ctx context.Context, rg, baseName string) {
+	if rg == "" || baseName == "" {
+		return
+	}
+	vmName := fmt.Sprintf("%s-bigip-ve", baseName)
+	// #nosec G204 -- controlled Azure CLI VM name from cluster config
+	if err := exec.CommandContext(ctx, "az", "vm", "show", "-g", rg, "-n", vmName, "-o", "none").Run(); err == nil {
+		fmt.Fprintf(os.Stderr, "[down] bigip-ve: deleting companion VM %s in %s\n", vmName, rg)
+		// #nosec G204 -- controlled Azure CLI VM name from cluster config
+		_ = exec.CommandContext(ctx, "az", "vm", "delete", "-g", rg, "-n", vmName, "--yes").Run()
+	}
+	diskName := fmt.Sprintf("%s-bigip-ve-osdisk", baseName)
+	// #nosec G204 -- controlled Azure CLI disk name from cluster config
+	_ = exec.CommandContext(ctx, "az", "disk", "delete", "-g", rg, "-n", diskName, "--yes", "--no-wait").Run()
+	for _, suffix := range []string{"mgmt-nic", "ext-nic", "int-nic"} {
+		nicName := fmt.Sprintf("%s-bigip-%s", baseName, suffix)
+		// #nosec G204 -- controlled Azure CLI NIC name from cluster config
+		_ = exec.CommandContext(ctx, "az", "network", "nic", "delete", "-g", rg, "-n", nicName).Run()
+	}
 }
 
 // PhaseDownNAT tears down the NAT Gateway and associated Public IPs.
@@ -263,11 +403,15 @@ func PhaseDownNAT(ctx context.Context, cl *intent.Cluster, st *state.State, clie
 		for _, rg := range rgCandidates {
 			for _, cand := range natCandidates {
 				if poller, err := clients.NatGateways.BeginDelete(ctx, rg, cand, nil); err != nil {
+					if isAzureScopeLocked(err) {
+						fmt.Fprintf(os.Stderr, "[down] warning: skipping NAT Gateway %s delete in %s due to CanNotDelete lock (ScopeLocked)\n", cand, rg)
+						continue
+					}
 					if !isAzureNotFound(err) {
 						return fmt.Errorf("delete NAT Gateway %s in %s: %w", cand, rg, err)
 					}
 				} else if poller != nil {
-					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) && !isAzureScopeLocked(err) {
 						return fmt.Errorf("waiting for NAT Gateway %s delete: %w", cand, err)
 					}
 				}
@@ -279,11 +423,15 @@ func PhaseDownNAT(ctx context.Context, cl *intent.Cluster, st *state.State, clie
 		for _, rg := range rgCandidates {
 			for _, pip := range pips {
 				if poller, err := clients.PublicIPAddresses.BeginDelete(ctx, rg, pip, nil); err != nil {
+					if isAzureScopeLocked(err) {
+						fmt.Fprintf(os.Stderr, "[down] warning: skipping Public IP %s delete in %s due to CanNotDelete lock (ScopeLocked)\n", pip, rg)
+						continue
+					}
 					if !isAzureNotFound(err) {
 						return fmt.Errorf("delete Public IP %s in %s: %w", pip, rg, err)
 					}
 				} else if poller != nil {
-					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) && !isAzureScopeLocked(err) {
 						return fmt.Errorf("waiting for Public IP %s delete: %w", pip, err)
 					}
 				}
@@ -349,11 +497,15 @@ func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, st *state.State,
 		for _, rg := range rgCandidates {
 			for _, cand := range vnetCandidates {
 				if poller, err := clients.VirtualNetworks.BeginDelete(ctx, rg, cand, nil); err != nil {
+					if isAzureScopeLocked(err) {
+						fmt.Fprintf(os.Stderr, "[down] warning: skipping VNet %s delete in %s due to CanNotDelete lock (ScopeLocked)\n", cand, rg)
+						continue
+					}
 					if !isAzureNotFound(err) {
 						return fmt.Errorf("delete VNet %s in %s: %w", cand, rg, err)
 					}
 				} else if poller != nil {
-					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) && !isAzureScopeLocked(err) {
 						return fmt.Errorf("waiting for VNet %s delete: %w", cand, err)
 					}
 				}
@@ -365,11 +517,15 @@ func PhaseDownNetworks(ctx context.Context, cl *intent.Cluster, st *state.State,
 		for _, rg := range rgCandidates {
 			for _, cand := range nsgCandidates {
 				if poller, err := clients.SecurityGroups.BeginDelete(ctx, rg, cand, nil); err != nil {
+					if isAzureScopeLocked(err) {
+						fmt.Fprintf(os.Stderr, "[down] warning: skipping NSG %s delete in %s due to CanNotDelete lock (ScopeLocked)\n", cand, rg)
+						continue
+					}
 					if !isAzureNotFound(err) {
 						return fmt.Errorf("delete NSG %s in %s: %w", cand, rg, err)
 					}
 				} else if poller != nil {
-					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) {
+					if _, err := poller.PollUntilDone(ctx, nil); err != nil && !isAzureNotFound(err) && !isAzureScopeLocked(err) {
 						return fmt.Errorf("waiting for NSG %s delete: %w", cand, err)
 					}
 				}
@@ -440,14 +596,23 @@ func stripStuckFinalizers(ctx context.Context, kubeconfigPath string) {
 		"f5-spk-staticroutes.k8s.f5net.com",
 		"f5-spk-egresses.k8s.f5net.com",
 		"f5-spk-snatpools.k8s.f5net.com",
+		"f5-big-irules.k8s.f5net.com",
+		"f5-big-cne-irules.k8s.f5net.com",
 		"f5-big-dns-caches.k8s.f5net.com",
 		"f5-big-persistence-profiles.k8s.f5net.com",
+		"f5-big-fw-policies.k8s.f5net.com",
 		"infras.gateway.k8s.f5.com",
+		"l2networks.gateway.k8s.f5.com",
+		"l3networks.gateway.k8s.f5.com",
+		"backends.gateway.k8s.f5.com",
 		"gatewaysettings.gateway.k8s.f5.com",
 		"egressgateways.gateway.k8s.f5.com",
 		"l4routes.gateway.k8s.f5.com",
 		"l4globalpolicies.gateway.k8s.f5.com",
 		"apppolicies.gateway.k8s.f5.com",
+		"netpolicies.gateway.k8s.f5.com",
+		"secpolicies.gateway.k8s.f5.com",
+		"f5epps.gateway.k8s.f5.com",
 		"airoutepolicies.inference.k8s.f5.com",
 		"airoutes.inference.k8s.f5.com",
 		"aigateways.inference.k8s.f5.com",
@@ -478,6 +643,11 @@ func stripStuckFinalizers(ctx context.Context, kubeconfigPath string) {
 		"f5-bnk-instance",
 		"f5-utils",
 		"f5-bnk",
+		"aigateway",
+		"vllm-semantic-router-system",
+		"llm-egress",
+		"agentfoundry",
+		"default",
 		"bnk-demo",
 		"egress-demo",
 	}
@@ -533,6 +703,9 @@ func crdsToGVRs(crds []string) []schema.GroupVersionResource {
 			version = "v1alpha1"
 		}
 		gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: version, Resource: resource})
+		if group == "gateway.k8s.f5.com" {
+			gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: "v1", Resource: resource})
+		}
 		if resource == "f5-spk-egresses" {
 			gvrs = append(gvrs, schema.GroupVersionResource{Group: group, Version: "v3", Resource: resource})
 		}

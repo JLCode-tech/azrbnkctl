@@ -20,8 +20,11 @@ import (
 )
 
 var gatewayCRDManifests = []string{
-	"static/00-gateway-api-crds.yaml",
 	"static/01-gie-crds.yaml",
+}
+
+var gatewayFallbackCRDManifests = []string{
+	"static/00-gateway-api-crds.yaml",
 	"static/02-bnk-gateway-crds.yaml",
 }
 
@@ -40,7 +43,7 @@ var gatewayEstablishedCRDs = []string{
 	"backends.gateway.k8s.f5.com",
 }
 
-// Phase36GatewayAPI installs Gateway API, GIE, and BNK 2.4 CRDs, then applies GatewayClasses.
+// Phase36GatewayAPI installs GIE CRDs, waits for FLO crd-installer Gateway API/BNK 2.4 CRDs, and applies GatewayClasses.
 func Phase36GatewayAPI(ctx context.Context, cl *intent.Cluster, st *state.State, _ *azure.Clients, dryRun bool) error {
 	gwcName := cl.Metadata.Name + "-gatewayclass"
 	if cl.Metadata.Name == "" {
@@ -80,6 +83,17 @@ func Phase36GatewayAPI(ctx context.Context, cl *intent.Cluster, st *state.State,
 	dyn, err := k8s.NewDynamicFromConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("phase36: creating dynamic client: %w", err)
+	}
+
+	// Only apply bundled fallback CRDs when FLO crd-installer has not installed them (e.g. 2.3.x or mock test clusters).
+	if waitErr := k8s.WaitForCRDEstablished(ctx, dyn, "gatewayclasses.gateway.networking.k8s.io", 30*time.Second); waitErr != nil {
+		for _, manifestPath := range gatewayFallbackCRDManifests {
+			if crdBytes, readErr := manifests.FS.ReadFile(manifestPath); readErr == nil {
+				if crdObjs, parseErr := k8s.ParseYAMLStream(crdBytes); parseErr == nil {
+					_ = applier.ApplyAll(ctx, crdObjs, true)
+				}
+			}
+		}
 	}
 
 	for _, crdName := range gatewayEstablishedCRDs {

@@ -659,7 +659,13 @@ func (c *Cluster) derive(baseDir string) error {
 		if filepath.IsAbs(c.Bnk.FARArchive) {
 			c.Derived.FARArchiveFullPath = c.Bnk.FARArchive
 		} else {
-			c.Derived.FARArchiveFullPath = filepath.Join(baseDir, c.Bnk.FARArchive)
+			cand := filepath.Join(baseDir, c.Bnk.FARArchive)
+			if _, stErr := os.Stat(cand); stErr != nil {
+				if _, cwdErr := os.Stat(c.Bnk.FARArchive); cwdErr == nil {
+					cand = c.Bnk.FARArchive
+				}
+			}
+			c.Derived.FARArchiveFullPath = cand
 		}
 	}
 
@@ -667,7 +673,13 @@ func (c *Cluster) derive(baseDir string) error {
 		if filepath.IsAbs(c.Bnk.JWT) {
 			c.Derived.JWTFullPath = c.Bnk.JWT
 		} else {
-			c.Derived.JWTFullPath = filepath.Join(baseDir, c.Bnk.JWT)
+			cand := filepath.Join(baseDir, c.Bnk.JWT)
+			if _, stErr := os.Stat(cand); stErr != nil {
+				if _, cwdErr := os.Stat(c.Bnk.JWT); cwdErr == nil {
+					cand = c.Bnk.JWT
+				}
+			}
+			c.Derived.JWTFullPath = cand
 		}
 	}
 

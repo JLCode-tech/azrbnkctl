@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -116,27 +117,61 @@ func purgeStaleCPCLSecrets(ctx context.Context, client kubernetes.Interface) {
 		return
 	}
 
-	var fallbackJWTKey string
-	if cm, err := client.CoreV1().ConfigMaps("f5-utils").Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil {
-		fallbackJWTKey = cm.Data["jwt.key"]
+	var fallbackJWTKey, fallbackJWKS string
+	for _, srcNS := range []string{"f5-cne-core", "f5-utils"} {
+		if cm, err := client.CoreV1().ConfigMaps(srcNS).Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil {
+			if fallbackJWTKey == "" && cm.Data["jwt.key"] != "" {
+				fallbackJWTKey = cm.Data["jwt.key"]
+			}
+			if fallbackJWKS == "" && cm.Data["jwks.json"] != "" {
+				fallbackJWKS = cm.Data["jwks.json"]
+			}
+		}
 	}
 
-	for _, ns := range []string{"f5-utils", "f5-cne-core"} {
+	for _, ns := range []string{"f5-utils", "f5-cne-core", "f5-cne-system"} {
 		jwtKey := fallbackJWTKey
-		if cm, err := client.CoreV1().ConfigMaps(ns).Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil && cm.Data["jwt.key"] != "" {
-			jwtKey = cm.Data["jwt.key"]
+		jwks := fallbackJWKS
+		if cm, err := client.CoreV1().ConfigMaps(ns).Get(ctx, "cpcl-key-cm", metav1.GetOptions{}); err == nil && cm != nil {
+			if cm.Data["jwt.key"] != "" {
+				jwtKey = cm.Data["jwt.key"]
+			}
+			if cm.Data["jwks.json"] != "" {
+				jwks = cm.Data["jwks.json"]
+			}
 		}
 		if jwtKey == "" {
 			continue
 		}
 		sec, err := client.CoreV1().Secrets(ns).Get(ctx, "cpcl-key-secret", metav1.GetOptions{})
 		if err != nil || sec == nil {
+			if apierrors.IsNotFound(err) {
+				data := map[string][]byte{
+					"jwt.key": []byte(jwtKey),
+				}
+				if jwks != "" {
+					data["jwks.json"] = []byte(jwks)
+				}
+				newSec := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cpcl-key-secret",
+						Namespace: ns,
+					},
+					Data: data,
+				}
+				if _, cErr := client.CoreV1().Secrets(ns).Create(ctx, newSec, metav1.CreateOptions{}); cErr == nil {
+					fmt.Fprintf(os.Stderr, "[phase 35] created cpcl-key-secret from cpcl-key-cm in %s\n", ns)
+				}
+			}
 			continue
 		}
 		if sec.Data == nil {
 			sec.Data = make(map[string][]byte)
 		}
 		sec.Data["jwt.key"] = []byte(jwtKey)
+		if jwks != "" {
+			sec.Data["jwks.json"] = []byte(jwks)
+		}
 		if _, updErr := client.CoreV1().Secrets(ns).Update(ctx, sec, metav1.UpdateOptions{}); updErr == nil {
 			fmt.Fprintf(os.Stderr, "[phase 35] synced cpcl-key-secret from cpcl-key-cm in %s\n", ns)
 		}

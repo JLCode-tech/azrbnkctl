@@ -169,7 +169,9 @@ func TestRenderInfra(t *testing.T) {
 		"name: route-cluster-pods",
 		"name: route-cluster-svcs",
 		"name: route-default-egress",
-		"nextHop: 10.0.18.1",
+		"nextHop: 10.0.17.1",
+		"kind: F5BigDnsCache",
+		"name: aigw-dns-resolver",
 	} {
 		if !strings.Contains(str, want) {
 			t.Errorf("expected %q in RenderInfra output, got:\n%s", want, str)
