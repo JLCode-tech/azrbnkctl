@@ -61,6 +61,7 @@ func cancelBlockingVMSSRollingUpgrades(ctx context.Context, err error) {
 			continue
 		}
 		vmss := m[1]
+		// #nosec G204 -- controlled Azure CLI VMSS name from Azure SDK error response
 		_ = exec.CommandContext(ctx, "az", "vmss", "rolling-upgrade", "cancel", "-g", nodeRG, "-n", vmss).Run()
 	}
 }
@@ -108,10 +109,12 @@ func deallocateLockedCompute(ctx context.Context, rg, clusterName, baseName stri
 	if baseName != "" {
 		vmName := fmt.Sprintf("%s-bigip-ve", baseName)
 		fmt.Fprintf(os.Stderr, "[down] ScopeLocked fallback: deallocating companion BIG-IP VE %s in %s\n", vmName, rg)
+		// #nosec G204 -- controlled Azure CLI VM name from cluster config
 		_ = exec.CommandContext(ctx, "az", "vm", "deallocate", "-g", rg, "-n", vmName, "--no-wait").Run()
 	}
 	if clusterName != "" {
 		fmt.Fprintf(os.Stderr, "[down] ScopeLocked fallback: stopping AKS cluster %s in %s\n", clusterName, rg)
+		// #nosec G204 -- controlled Azure CLI cluster name from cluster config
 		_ = exec.CommandContext(ctx, "az", "aks", "stop", "-g", rg, "-n", clusterName, "--no-wait").Run()
 	}
 }
@@ -321,14 +324,18 @@ func cleanupCompanionBigIPVE(ctx context.Context, rg, baseName string) {
 		return
 	}
 	vmName := fmt.Sprintf("%s-bigip-ve", baseName)
+	// #nosec G204 -- controlled Azure CLI VM name from cluster config
 	if err := exec.CommandContext(ctx, "az", "vm", "show", "-g", rg, "-n", vmName, "-o", "none").Run(); err == nil {
 		fmt.Fprintf(os.Stderr, "[down] bigip-ve: deleting companion VM %s in %s\n", vmName, rg)
+		// #nosec G204 -- controlled Azure CLI VM name from cluster config
 		_ = exec.CommandContext(ctx, "az", "vm", "delete", "-g", rg, "-n", vmName, "--yes").Run()
 	}
 	diskName := fmt.Sprintf("%s-bigip-ve-osdisk", baseName)
+	// #nosec G204 -- controlled Azure CLI disk name from cluster config
 	_ = exec.CommandContext(ctx, "az", "disk", "delete", "-g", rg, "-n", diskName, "--yes", "--no-wait").Run()
 	for _, suffix := range []string{"mgmt-nic", "ext-nic", "int-nic"} {
 		nicName := fmt.Sprintf("%s-bigip-%s", baseName, suffix)
+		// #nosec G204 -- controlled Azure CLI NIC name from cluster config
 		_ = exec.CommandContext(ctx, "az", "network", "nic", "delete", "-g", rg, "-n", nicName).Run()
 	}
 }
